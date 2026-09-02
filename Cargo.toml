@@ -1,0 +1,22 @@
+[package]
+name = "overlay-timer"
+version = "0.2.1"
+edition = "2024"
+rust-version = "1.95"
+description = "A Windows presenter countdown with a separate click-through overlay"
+
+[dependencies]
+eframe = { version = "0.36.1", features = ["persistence"] }
+global-hotkey = "0.8.0"
+serde = { version = "1.0", features = ["derive"] }
+tray-icon = { version = "0.24.2", default-features = false }
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
