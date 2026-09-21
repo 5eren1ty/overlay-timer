@@ -71,3 +71,13 @@ Das Release-Binary liegt anschließend unter `target\release\overlay-timer.exe`.
 - Falls das Tray-Icon nicht erstellt werden kann, zeigt die App eine Warnung an und minimiert weiterhin normal in die Taskleiste.
 - Bei einem Hotkey-Konflikt zeigt das Steuerfenster eine Warnung an. Die restliche Anwendung bleibt verwendbar.
 - Das Overlay ist für normale Desktop-Vollbildfenster wie PowerPoints Präsentationsmodus gedacht, nicht für exklusives DirectX-Vollbild.
+
+## Separate Overlay-Diagnose
+
+Für Randfarbe, Schatten und Transparenz gibt es ein unabhängiges Testprogramm:
+target\release\overlay-diagnostics.exe. Es kann schwarze und rote DWM-Ränder
+sowie verschiedene Fenstergrößen vergleichen und legt pro Test ein Protokoll an.
+Bedienung und Aussagegrenzen stehen in [DIAGNOSTICS.md](DIAGNOSTICS.md).
+
+Bauen: cargo build --release --bin overlay-diagnostics.
+Die Hauptanwendung bleibt das Standardziel von cargo run --release.

@@ -7,6 +7,7 @@ mod monitors;
 mod overlay;
 mod timer;
 mod tray;
+mod window_trace;
 mod windows_overlay;
 
 use app::OverlayTimerApp;

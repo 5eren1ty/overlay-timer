@@ -46,7 +46,7 @@ GL-Fenstern und Vermeidung durch eine kleinere Fenstergröße. Das ist ein Hinwe
 kein Nachweis für diese Anwendung:
 <https://github.com/godotengine/godot/issues/107582>.
 
-## Empfohlener nächster Schritt (noch nicht implementiert)
+## Untersuchungsplan nach dem Rückbau
 
 Eine separate minimale Test-EXE vergleichen, ohne die funktionierende Release-EXE
 zu ersetzen: Schatten an/aus bei einem kleinen normalen Overlayfenster,
@@ -69,3 +69,116 @@ größeren Umbau und manuelle Abnahme. Windows dokumentiert diesen Alphapfad:
 
 Keine weiteren Schatten-/WM_NCCALCSIZE-Eingriffe in die Hauptanwendung, bevor
 Transparenz und fehlende Randlinie zusammen im separaten Versuch bestätigt sind.
+
+## Separate Diagnose und Farbvergleich implementiert
+
+Die eigenständige overlay-diagnostics.exe ist jetzt als weiteres Binary
+vorhanden. Sie vergleicht DWM-Randfarben (unterdrückt, Standard, Schwarz, Rot),
+Schatten, kleine/exakte/eingerückte Geometrie, Vollbildmodus, Klickdurchlässigkeit
+und Fokus. Optionale Caption- und Client-Linienfarben grenzen den Besitzer des
+Pixels ein. Beschreibung: [DIAGNOSTICS.md](DIAGNOSTICS.md).
+
+Die Farbattribute ändern weder Schatten noch Geometrie. Dass der störende Pixel
+darauf reagiert, ist noch nicht visuell bestätigt. Die Diagnose protokolliert
+erstmals die DWM-Rückgabewerte und zurückgelesenen Farben.
+
+Die Diagnose verwendet einen separaten Root-Viewport statt des produktiven
+Mehrfensterbetriebs und setzt Schatten zur Laufzeit vor dem ersten sichtbaren
+Frame. Der Vergleich ist deshalb zunächst anhand des Ausgangszustands zu
+validieren. Die Hauptanwendung und ihre bestehende Release-EXE bleiben unverändert.
+
+## Manuelle Befunde und Diagnosekorrektur, 21. September 2026
+
+Rückmeldung des Benutzers:
+
+| Test | Beobachtung |
+|---|---|
+| Normales Fenster in exakter Monitorgröße, Schatten aus | Hintergrund wird schwarz; Diagnoseanimation bleibt sichtbar |
+| Kleines Fenster, Schatten an | Rand sichtbar |
+| Kleines Fenster, Schatten aus | Kein Rand |
+| „Monitorfüllend wie Hauptanwendung“, Schatten an oder aus | Kein erkennbarer Rand; dieser Test war wegen eines Diagnosefehlers nicht monitorfüllend |
+
+Die Protokolle des betroffenen Displays (1920 × 1080, Desktop-Ursprung
+2560/243, Skalierung 100 %) zeigen:
+
+- Normales exaktes Fenster: äußeres Rechteck 2560/243 bis 4480/1323;
+  ohne Schatten liegt auch der Client-Ursprung bei 2560/243.
+- Mit Schatten verschiebt sich der Client-Ursprung in den ausgewerteten Fällen
+  um genau einen Pixel nach unten; ohne Schatten entfällt dieser Versatz.
+- Der als Fullscreen bezeichnete Test hatte tatsächlich nur 800 × 450 Pixel,
+  obwohl winit einen gesetzten Vollbildmodus meldete. Beispiel:
+  test-1790025180564-6488.log. Daraus darf weder funktionierende randlose
+  Vollbildtransparenz noch eine Abweichung zum produktiven Vollbild abgeleitet werden.
+- Rot und Schwarz wurden von DwmSetWindowAttribute angenommen. Die zusätzliche
+  Leseoperation scheiterte mit E_INVALIDARG; dies widerlegt den Set-Erfolg nicht.
+  Eine sichtbare Wirkung der Randfarbe ist noch nicht vom Benutzer bestätigt.
+- Es gab einen eingerückten Test mit Schatten an, aber noch keinen protokollierten
+  eingerückten Test mit Schatten aus in dieser Auswertung.
+
+Ursache des Diagnosefehlers: Der ViewportBuilder enthielt sowohl Monitorwahl
+als auch eine feste innere Startgröße von 800 × 450. egui-winit wendet die
+innere Größe nach Erstellung des Vollbildfensters erneut an. Der anschließende
+Aufruf mit identischem Vollbildmodus korrigierte diese Größe nicht.
+
+Revision 2 entfernt die feste Größe aus dem Vollbildaufbau und entfernt auch
+etwaige wiederhergestellte Größen/Positionen im finalen Builder-Hook. Vor der
+Diagnoseausgabe werden native Position, Größe und Vollbildstatus gegen die
+gewählte Testkonfiguration geprüft. Eine Abweichung beendet den Test mit Fehler;
+die geprüfte Größe erscheint im Testfenster und Protokoll. Regressionstests
+verwenden die oben gemessene falsche 800×450-Konfiguration.
+
+Nächste gezielte Vergleiche: korrigierter Vollbildtest mit Schatten an/aus und
+das normale, an jeder Kante einen physischen Pixel eingerückte Fenster mit
+Schatten aus. Die beiden bereits gültigen kleinen/exakten Testfälle müssen
+nicht allein wegen des Vollbildfehlers wiederholt werden. Keine Änderung an
+der Hauptanwendung aus den ungültigen Vollbildergebnissen ableiten.
+
+## Bestätigte Ergebnisse mit Revision 2
+
+Die anschließende Benutzerrückmeldung bestätigt:
+
+| Aufbau | Schatten | Visuelles Ergebnis |
+|---|---|---|
+| Normales Fenster, exakt Monitorgröße | Aus | Schwarzer Hintergrund |
+| Normales Fenster, exakt Monitorgröße | An | Durchsichtiger Hintergrund, sichtbarer Schatten/Rand |
+| Normales Fenster, jede Kante 1 Pixel eingerückt | Aus | Funktioniert transparent und ohne störenden Schatten |
+| Monitorfüllender Vollbildmodus | An | Transparent; laut Benutzer funktioniert diese Konfiguration |
+| Monitorfüllender Vollbildmodus | Aus | Schwarz und undurchsichtig; nachträglich vom Benutzer präzisiert |
+
+Die neuen Protokolle enthalten erfolgreiche Geometrieprüfungen:
+
+- Exakt: 1920 × 1080, äußeres Rechteck 2560/243 bis 4480/1323.
+  Ohne Schatten entspricht der Client-Ursprung exakt der Monitorecke;
+  mit Schatten liegt er einen Pixel darunter.
+- Eingerückt ohne Schatten: 1918 × 1078, äußeres Rechteck
+  2561/244 bis 4479/1322; Client-Ursprung entspricht der äußeren Ecke.
+  Beispiele: test-1790025686923-29760.log und test-1790025709434-29760.log.
+- Vollbild: jetzt tatsächlich 1920 × 1080. Die bei der vorherigen Auswertung
+  gelesenen Vollbildprotokolle verwenden Schatten an
+  (z. B. test-1790025731483-29760.log). Der Benutzer hat anschließend ausdrücklich
+  präzisiert: Vollbild funktioniert nur mit Schatten; ohne Schatten wird auch
+  dieses Fenster schwarz und undurchsichtig.
+
+Alle genannten Fenster verwenden denselben GL-Renderer. Normales Fenster
+und Vollbild haben zwar unterschiedliche native Fensterstile, zeigen bei voller
+Monitorgröße ohne Schatten nach Benutzerbestätigung aber denselben
+Transparenzverlust. Ein Wechsel zum Vollbildmodus allein löst das Problem nicht.
+
+Ableitung: Schattenabschaltung ist für diese Grafik-/Windows-Konfiguration
+bei kleinen und um einen Pixel eingerückten Fenstern möglich. Volle
+Monitorgröße zusammen mit abgeschaltetem Schatten führt in beiden getesteten
+Fenstermodi zum schwarzen Hintergrund. Das stützt die Geometriehypothese stärker;
+die präzise interne Treiber-/Kompositionsursache ist weiterhin nicht bewiesen.
+
+Für einen gezielten nächsten Versuch in der Hauptanwendung empfiehlt sich das
+bereits visuell bestätigte normale Fenster mit einem physischen Pixel Abstand
+an jeder Kante und abgeschaltetem Schatten. Auf 1920×1080 bedeutet das
+1918×1078 ab Monitorursprung +1/+1. Die ausgelassenen Desktop-Pixel bleiben
+unbedeckt; es wird kein schwarzer Rahmen gezeichnet. Eine neue UI-Library ist
+für diesen Versuch nicht erforderlich.
+
+Die Übertragung in den zusätzlichen Overlay-Viewport der Hauptanwendung
+benötigt noch einen eigenen manuellen Test, insbesondere nach Monitorwechsel
+und beim Umschalten des Bearbeitungsmodus. Bislang wurde aus dieser letzten
+Rückmeldung nur die Diagnoseauswertung dokumentiert, kein neuer produktiver
+Fensterpatch eingebaut.

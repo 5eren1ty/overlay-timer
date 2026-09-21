@@ -1,8 +1,8 @@
 //! Windows-specific border handling for the fullscreen overlay.
 //!
 //! `winit` refreshes the non-client frame when mouse pass-through changes.
-//! Reapplying the invisible DWM border after those refreshes prevents the
-//! one-pixel top border from becoming visible again.
+//! Reapplying border suppression after those refreshes attempts to hide the
+//! native border. Its visual effectiveness still requires a manual test.
 
 #[cfg(target_os = "windows")]
 mod platform {
@@ -48,7 +48,7 @@ mod platform {
         // SAFETY: `hwnd` belongs to this process and `border_color` is passed
         // with the exact size expected for DWMWA_BORDER_COLOR. Reapplying this
         // attribute is idempotent and intentionally follows winit frame changes.
-        let _ = unsafe {
+        let result = unsafe {
             DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_BORDER_COLOR,
@@ -56,6 +56,7 @@ mod platform {
                 size_of::<u32>() as u32,
             )
         };
+        crate::window_trace::record(hwnd, "fullscreen", &format!("dwm_border_none={result:?}"));
     }
 }
 
