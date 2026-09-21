@@ -81,3 +81,29 @@ Bedienung und Aussagegrenzen stehen in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 
 Bauen: cargo build --release --bin overlay-diagnostics.
 Die Hauptanwendung bleibt das Standardziel von cargo run --release.
+
+## Ein-Pixel-Variante
+
+Auf dem Branch codex/overlay-one-pixel verwendet die Hauptanwendung ein normales
+transparentes Overlayfenster ohne Schatten. Es bleibt an jeder Monitorkante
+genau einen physischen Pixel innerhalb des Bildschirms. Native Fenster- und
+Clientrechtecke werden vor dem Einblenden und während des Betriebs geprüft.
+Dies gilt auch für negative Monitorpositionen und unterschiedliche Skalierungen.
+Bei einem Geometriefehler wird das Overlay verborgen und die Steuerung zeigt
+eine Fehlermeldung; Details stehen im Anwendungsprotokoll.
+
+Die korrekte Position wird auch bei minimierter Steuerung im Hintergrund
+synchronisiert. Timer-/GIF-Positionen beziehen sich weiterhin auf die verfügbare
+Overlayfläche. Der lokale egui-winit-Patch berücksichtigt die Schattenoption bei
+der Erstellung des zusätzlichen Fensters; Umfang und Grenze sind in
+vendor/egui-winit/PATCH.md dokumentiert.
+
+Der Vollbild-Vergleichsbuild liegt unter
+target\release\overlay-timer-fullscreen.exe, der Ein-Pixel-Build unter
+target\release\overlay-timer-one-pixel.exe. Bitte nacheinander starten, da beide
+dieselben globalen Hotkeys verwenden. Die übliche overlay-timer.exe entspricht
+auf diesem Branch ebenfalls der Ein-Pixel-Variante.
+
+Protokolle: %TEMP%\overlay-timer-diagnostics\application-fullscreen-*.log
+beziehungsweise application-one-pixel-*.log.
+Der Quellcodevergleich steht in [OVERLAY_COMPARISON.md](OVERLAY_COMPARISON.md).

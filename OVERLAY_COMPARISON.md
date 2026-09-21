@@ -44,7 +44,7 @@ Keiner dieser Unterschiede ist bisher als alleinige Ursache des hellen Streifens
 in der Hauptanwendung nachgewiesen. Auch der Farbvergleich ist ohne gleiche
 Randvorgabe noch kein vollständig kontrollierter Vergleich.
 
-Die vorhandenen Diagnoseprotokolle bestätigen inzwischen: Volle Monitorgröße
+Die manuellen Testergebnisse und die zugehörigen Geometrieprotokolle zeigen: Volle Monitorgröße
 ohne Schatten wird sowohl im normalen Fenster als auch im Vollbild schwarz.
 Mit Schatten funktioniert Vollbild. Ein normales Fenster, das an jeder Kante
 einen physischen Pixel eingerückt ist, bleibt ohne Schatten transparent.
@@ -65,9 +65,15 @@ Dessen ursprüngliches Overlayverhalten bleibt erhalten.
 
 ## Zusätzliche Ein-Pixel-Variante
 
-Sie wird auf codex/overlay-one-pixel erstellt. Sie verwendet ein gewöhnliches
+Sie ist auf codex/overlay-one-pixel umgesetzt. Sie verwendet ein gewöhnliches
 rahmenloses Fenster mit ausgeschaltetem Schatten und setzt die native äußere
 Fensterfläche auf Monitorursprung +1/+1 sowie Monitorbreite/-höhe minus 2.
-Die geänderte Größe soll vor dem Einblenden bereitstehen und nach Monitor-
-oder DPI-Wechsel erneut geprüft werden. Die tatsächliche Hauptanwendung mit
+Die geänderte Größe wird vor dem Einblenden geprüft und nach Monitor-
+oder DPI-Wechsel erneut geprüft. Die tatsächliche Hauptanwendung mit
 Bearbeitungsmodus und GIF muss anschließend manuell bestätigt werden.
+
+Die Ein-Pixel-Version liegt separat unter
+target\release\overlay-timer-one-pixel.exe. Beide Versionen schreiben native
+Geometrieprotokolle. Die automatischen Prüfungen der Ein-Pixel-Version sind
+abgeschlossen: 26 Tests erfolgreich, Clippy ohne Warnungen und Release-Build
+erfolgreich. Die GUI wurde nicht gestartet; die Sichtprüfung ist noch offen.

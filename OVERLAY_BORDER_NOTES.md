@@ -182,3 +182,26 @@ benötigt noch einen eigenen manuellen Test, insbesondere nach Monitorwechsel
 und beim Umschalten des Bearbeitungsmodus. Bislang wurde aus dieser letzten
 Rückmeldung nur die Diagnoseauswertung dokumentiert, kein neuer produktiver
 Fensterpatch eingebaut.
+
+## Ein-Pixel-Variante implementiert
+
+Die zusätzliche Hauptanwendungsvariante liegt auf codex/overlay-one-pixel.
+Sie verwendet keinen Vollbildmodus, hält Schatten und Dekoration konstant aus
+und positioniert das native Fenster einen physischen Pixel innerhalb jeder
+Monitorkante. Fenster- und Clientgeometrie müssen vor dem Einblenden übereinstimmen.
+Die Prüfung läuft auch bei versteckter Steuerung und erneut vor dem Overlayrendern.
+
+Der Start des zusätzlichen Fensters bleibt zunächst verborgen, damit weder die
+temporäre Erstellungsgröße noch ein ungeprüfter Rahmen sichtbar werden.
+Bei Monitor-/DPI-Änderungen wird eine abweichende äußere Größe korrigiert;
+die Kontrolle selbst erzwingt keine erneute Rahmenberechnung, falls alles stimmt.
+
+Die lokale Anpassung von egui-winit berücksichtigt die explizite Schattenoption
+bei Erstellung. Laufende Änderungen von Dekorationen werden von dieser kleinen
+Anpassung nicht allgemein unterstützt; die Anwendung hält die Dekoration konstant.
+Ein Regressionstest prüft, dass Sichtbarkeits- und Bearbeitungswechsel weder
+Dekorations- noch Vollbildkommandos auslösen.
+
+Noch nicht visuell bestätigt: Die Ein-Pixel-Umsetzung im tatsächlichen
+Zusatzfenster, einschließlich Monitorwechsel, Bearbeitungsmodus, Tray-Betrieb
+und GIF. Keine GUI-Sichtprüfung wurde vom Agenten gestartet.

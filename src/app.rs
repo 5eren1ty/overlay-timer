@@ -395,6 +395,13 @@ impl OverlayTimerApp {
                         self.show_timer_console(ui, now, palette);
                         ui.add_space(14.0);
                         self.show_output_panel(ui, palette);
+                        if let Some(error) = self.overlay.native_error() {
+                            error_box(
+                                ui,
+                                &format!("Overlay konnte nicht eingeblendet werden: {error}"),
+                                palette,
+                            );
+                        }
                         ui.add_space(14.0);
                         self.show_meme_panel(ui, palette);
                         ui.add_space(10.0);
@@ -838,7 +845,6 @@ impl eframe::App for OverlayTimerApp {
             self.theme_initialized_after_startup = true;
         }
         let now = Instant::now();
-        let overlay_was_visible = self.settings.overlay_visible;
         self.handle_minimize(ctx);
         self.process_overlay_events(ctx);
         if self.edit_mode && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
@@ -852,9 +858,9 @@ impl eframe::App for OverlayTimerApp {
         self.process_tray(ctx, now);
         self.sync_tray(now);
         self.sync_overlay(now);
-        if overlay_was_visible != self.settings.overlay_visible {
-            OverlayBridge::set_visible(ctx, self.settings.overlay_visible);
-        }
+        // Also runs while the controller is in the tray: a hidden, newly
+        // created overlay must be prepared before its first Visible command.
+        self.overlay.sync_native(ctx);
         OverlayBridge::request_repaint(ctx);
         ctx.request_repaint_after(Duration::from_millis(100));
     }

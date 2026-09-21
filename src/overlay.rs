@@ -122,6 +122,7 @@ pub struct OverlayBridge {
     events_tx: Sender<OverlayEvent>,
     events_rx: Receiver<OverlayEvent>,
     meme: Arc<MemeOverlay>,
+    native_error: Arc<RwLock<Option<String>>>,
 }
 
 impl OverlayBridge {
@@ -132,6 +133,7 @@ impl OverlayBridge {
             events_tx,
             events_rx,
             meme: Arc::new(MemeOverlay::default()),
+            native_error: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -157,9 +159,15 @@ impl OverlayBridge {
         egui::ViewportId::from_hash_of(OVERLAY_VIEWPORT_ID)
     }
 
-    pub fn set_visible(ctx: &egui::Context, visible: bool) {
-        ctx.send_viewport_cmd_to(Self::viewport_id(), egui::ViewportCommand::Visible(visible));
-        ctx.request_repaint_of(Self::viewport_id());
+    pub fn native_error(&self) -> Option<String> {
+        self.native_error
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
+    pub fn sync_native(&self, ctx: &egui::Context) -> bool {
+        synchronize_native(ctx, &self.snapshot(), &self.native_error)
     }
 
     pub fn request_repaint(ctx: &egui::Context) {
@@ -167,21 +175,13 @@ impl OverlayBridge {
     }
 
     pub fn show(&self, root_ui: &mut egui::Ui) {
-        crate::windows_overlay::ensure_overlay_window_configured();
         let snapshot = self.snapshot();
-        let viewport = egui::ViewportBuilder::default()
-            .with_title("Overlay Timer")
-            .with_monitor(snapshot.monitor_index)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_always_on_top()
-            .with_mouse_passthrough(!snapshot.edit_mode)
-            .with_taskbar(false)
-            .with_visible(snapshot.visible)
-            .with_resizable(false);
+        let ready = self.sync_native(root_ui.ctx());
+        let viewport = inset_viewport_builder(snapshot.visible && ready, snapshot.edit_mode);
         let shared_snapshot = Arc::clone(&self.snapshot);
         let events_tx = self.events_tx.clone();
         let meme = Arc::clone(&self.meme);
+        let native_error = Arc::clone(&self.native_error);
 
         root_ui.ctx().show_viewport_deferred(
             Self::viewport_id(),
@@ -191,15 +191,13 @@ impl OverlayBridge {
                     return;
                 }
 
-                // Viewport changes such as toggling mouse pass-through can refresh the
-                // native Windows frame after the root viewport was rendered.
-                crate::windows_overlay::ensure_overlay_window_configured();
-
                 let snapshot = shared_snapshot
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .clone();
-                if !snapshot.visible {
+                if !snapshot.visible
+                    || !synchronize_native(overlay_ui.ctx(), &snapshot, &native_error)
+                {
                     return;
                 }
 
@@ -296,6 +294,53 @@ impl OverlayBridge {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
     }
+}
+
+fn inset_viewport_builder(visible: bool, edit_mode: bool) -> egui::ViewportBuilder {
+    egui::ViewportBuilder::default()
+        .with_title("Overlay Timer")
+        .with_decorations(false)
+        .with_has_shadow(false)
+        .with_transparent(true)
+        .with_always_on_top()
+        .with_mouse_passthrough(!edit_mode)
+        .with_taskbar(false)
+        .with_active(false)
+        .with_visible(visible)
+        .with_resizable(false)
+        // Only an invisible creation size. Native physical placement is verified
+        // before showing; never use with_monitor (which implies fullscreen).
+        .with_inner_size([800.0, 450.0])
+}
+
+fn synchronize_native(
+    ctx: &egui::Context,
+    snapshot: &OverlaySnapshot,
+    error: &RwLock<Option<String>>,
+) -> bool {
+    let (ready, current_visible, new_error) =
+        match crate::windows_overlay::prepare_overlay(snapshot.monitor_index) {
+            Ok(Some(window)) => (true, Some(window.visible), None),
+            Ok(None) => (false, None, None),
+            Err(message) => (false, Some(true), Some(message)),
+        };
+    {
+        let mut error = error.write().unwrap_or_else(|p| p.into_inner());
+        if *error != new_error {
+            *error = new_error;
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    }
+    let desired_visible = snapshot.visible && ready;
+    if current_visible.is_some_and(|current| current != desired_visible) {
+        // Goes through winit so its visibility/style state remains consistent.
+        ctx.send_viewport_cmd_to(
+            OverlayBridge::viewport_id(),
+            egui::ViewportCommand::Visible(desired_visible),
+        );
+        ctx.request_repaint_of(OverlayBridge::viewport_id());
+    }
+    ready
 }
 
 fn edit_mode_exit_button(ctx: &egui::Context) -> bool {
@@ -518,6 +563,25 @@ fn position_from_normalized(position: [f32; 2], rect: egui::Rect) -> egui::Pos2 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inset_visibility_and_edit_transitions_keep_shadow_and_mode_constant() {
+        let mut builder = inset_viewport_builder(false, false);
+        assert_eq!(builder.has_shadow, Some(false));
+        assert_eq!(builder.monitor, None);
+        assert_eq!(builder.fullscreen, None);
+        for (visible, edit) in [(true, false), (true, true), (false, true), (true, false)] {
+            let (commands, recreate) = builder.patch(inset_viewport_builder(visible, edit));
+            assert!(!recreate);
+            assert!(!commands.iter().any(|command| matches!(
+                command,
+                egui::ViewportCommand::Decorations(_)
+                    | egui::ViewportCommand::Fullscreen(_)
+                    | egui::ViewportCommand::SetMonitor(_)
+            )));
+            assert_eq!(builder.has_shadow, Some(false));
+        }
+    }
 
     #[test]
     fn normalized_positions_round_trip_across_an_offset_monitor() {

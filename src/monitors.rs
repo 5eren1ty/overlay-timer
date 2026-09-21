@@ -12,6 +12,8 @@ use windows::{
 
 #[derive(Clone, Debug)]
 pub struct MonitorInfo {
+    pub x: i32,
+    pub y: i32,
     pub width: i32,
     pub height: i32,
     pub primary: bool,
@@ -42,6 +44,8 @@ pub fn enumerate() -> Vec<MonitorInfo> {
 
     if result.is_empty() {
         result.push(MonitorInfo {
+            x: 0,
+            y: 0,
             width: 0,
             height: 0,
             primary: true,
@@ -69,6 +73,8 @@ unsafe extern "system" fn monitor_callback(
     let rect = info.monitorInfo.rcMonitor;
 
     monitors.push(MonitorInfo {
+        x: rect.left,
+        y: rect.top,
         width: rect.right - rect.left,
         height: rect.bottom - rect.top,
         primary: info.monitorInfo.dwFlags & 1 != 0,
