@@ -10,8 +10,9 @@ use windows::{
             Gdi::ClientToScreen,
         },
         UI::WindowsAndMessaging::{
-            FindWindowExW, GetClientRect, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
-            SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+            FindWindowExW, GWL_EXSTYLE, GetClientRect, GetWindowLongPtrW, GetWindowRect,
+            GetWindowThreadProcessId, IsWindowVisible, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+            WS_EX_LAYERED, WS_EX_TRANSPARENT,
         },
     },
     core::{PCWSTR, w},
@@ -19,6 +20,7 @@ use windows::{
 
 pub struct PreparedWindow {
     pub visible: bool,
+    pub mouse_passthrough: bool,
 }
 
 fn find_overlay() -> Option<HWND> {
@@ -124,9 +126,13 @@ fn prepare(hwnd: HWND, monitor_index: usize) -> Result<PreparedWindow, String> {
         "one-pixel",
         &format!("target={target:?} dwm_border_none={border_result:?}"),
     );
-    // SAFETY: Querying our existing overlay's visibility.
+    // SAFETY: Read-only queries on our existing overlay. winit represents
+    // mouse passthrough with both of these extended window-style bits.
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+    let passthrough_mask = (WS_EX_LAYERED | WS_EX_TRANSPARENT).0;
     Ok(PreparedWindow {
         visible: unsafe { IsWindowVisible(hwnd) }.as_bool(),
+        mouse_passthrough: style & passthrough_mask == passthrough_mask,
     })
 }
 

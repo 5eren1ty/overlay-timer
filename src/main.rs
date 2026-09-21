@@ -23,7 +23,7 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Overlay Timer – Ein-Pixel-Variante")
+            .with_title("Overlay Timer – Ein-Pixel-Variante (Startfix)")
             .with_app_id("overlay-timer")
             .with_icon(icon::app_icon())
             .with_inner_size([520.0, 760.0])

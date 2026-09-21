@@ -107,3 +107,12 @@ auf diesem Branch ebenfalls der Ein-Pixel-Variante.
 Protokolle: %TEMP%\overlay-timer-diagnostics\application-fullscreen-*.log
 beziehungsweise application-one-pixel-*.log.
 Der Quellcodevergleich steht in [OVERLAY_COMPARISON.md](OVERLAY_COMPARISON.md).
+
+Die Startkorrektur vom 22. September steht als
+target\release\overlay-timer-one-pixel-startfix.exe bereit (Titel: „Startfix“).
+Sie aktiviert die Klickdurchlässigkeit nach der Grafikinitialisierung und vor
+dem Einblenden. Die vorherige Ein-Pixel-EXE bleibt für Vergleiche erhalten;
+overlay-timer.exe enthält auf diesem Branch ebenfalls die Startkorrektur.
+Vor dem manuellen Starttest die ältere Anwendung vollständig über das Tray
+beenden. Prüfen: Timer direkt nach Start sichtbar, Overlay aus/an, danach
+Bearbeitungsmodus an/aus und weiterhin kein Rand.

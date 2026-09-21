@@ -175,9 +175,8 @@ impl OverlayBridge {
     }
 
     pub fn show(&self, root_ui: &mut egui::Ui) {
-        let snapshot = self.snapshot();
-        let ready = self.sync_native(root_ui.ctx());
-        let viewport = inset_viewport_builder(snapshot.visible && ready, snapshot.edit_mode);
+        self.sync_native(root_ui.ctx());
+        let viewport = inset_viewport_builder();
         let shared_snapshot = Arc::clone(&self.snapshot);
         let events_tx = self.events_tx.clone();
         let meme = Arc::clone(&self.meme);
@@ -296,17 +295,23 @@ impl OverlayBridge {
     }
 }
 
-fn inset_viewport_builder(visible: bool, edit_mode: bool) -> egui::ViewportBuilder {
+fn inset_viewport_builder() -> egui::ViewportBuilder {
     egui::ViewportBuilder::default()
         .with_title("Overlay Timer")
         .with_decorations(false)
         .with_has_shadow(false)
         .with_transparent(true)
         .with_always_on_top()
-        .with_mouse_passthrough(!edit_mode)
+        // Creation only: allow the GL surface to initialize before Windows
+        // adds WS_EX_LAYERED. synchronize_native enables passthrough through
+        // winit after creation and before showing the prepared window.
+        .with_mouse_passthrough(false)
         .with_taskbar(false)
         .with_active(false)
-        .with_visible(visible)
+        // Keep builder defaults constant. eframe applies builder changes
+        // before queued commands, so a Visible(true) builder patch would
+        // show the window before our MousePassthrough(true) command.
+        .with_visible(false)
         .with_resizable(false)
         // Only an invisible creation size. Native physical placement is verified
         // before showing; never use with_monitor (which implies fullscreen).
@@ -318,11 +323,19 @@ fn synchronize_native(
     snapshot: &OverlaySnapshot,
     error: &RwLock<Option<String>>,
 ) -> bool {
-    let (ready, current_visible, new_error) =
+    let (ready, commands, new_error) =
         match crate::windows_overlay::prepare_overlay(snapshot.monitor_index) {
-            Ok(Some(window)) => (true, Some(window.visible), None),
-            Ok(None) => (false, None, None),
-            Err(message) => (false, Some(true), Some(message)),
+            Ok(Some(window)) => (
+                true,
+                prepared_window_commands(window, snapshot.visible, snapshot.edit_mode),
+                None,
+            ),
+            Ok(None) => (false, Vec::new(), None),
+            Err(message) => (
+                false,
+                vec![egui::ViewportCommand::Visible(false)],
+                Some(message),
+            ),
         };
     {
         let mut error = error.write().unwrap_or_else(|p| p.into_inner());
@@ -331,16 +344,31 @@ fn synchronize_native(
             ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
     }
-    let desired_visible = snapshot.visible && ready;
-    if current_visible.is_some_and(|current| current != desired_visible) {
+    for command in commands {
         // Goes through winit so its visibility/style state remains consistent.
-        ctx.send_viewport_cmd_to(
-            OverlayBridge::viewport_id(),
-            egui::ViewportCommand::Visible(desired_visible),
-        );
+        // Also runs from root logic while the controller is in the tray.
+        ctx.send_viewport_cmd_to(OverlayBridge::viewport_id(), command);
         ctx.request_repaint_of(OverlayBridge::viewport_id());
     }
     ready
+}
+
+fn prepared_window_commands(
+    window: crate::windows_overlay::PreparedWindow,
+    visible: bool,
+    edit_mode: bool,
+) -> Vec<egui::ViewportCommand> {
+    let mut commands = Vec::new();
+    let mouse_passthrough = !edit_mode;
+    if window.mouse_passthrough != mouse_passthrough {
+        commands.push(egui::ViewportCommand::MousePassthrough(mouse_passthrough));
+    }
+    // Apply passthrough before showing so a normal overlay never briefly
+    // intercepts clicks across the monitor during startup.
+    if window.visible != visible {
+        commands.push(egui::ViewportCommand::Visible(visible));
+    }
+    commands
 }
 
 fn edit_mode_exit_button(ctx: &egui::Context) -> bool {
@@ -565,21 +593,95 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inset_visibility_and_edit_transitions_keep_shadow_and_mode_constant() {
-        let mut builder = inset_viewport_builder(false, false);
+    fn inset_builder_keeps_creation_defaults_out_of_runtime_commands() {
+        let mut builder = inset_viewport_builder();
         assert_eq!(builder.has_shadow, Some(false));
         assert_eq!(builder.monitor, None);
         assert_eq!(builder.fullscreen, None);
-        for (visible, edit) in [(true, false), (true, true), (false, true), (true, false)] {
-            let (commands, recreate) = builder.patch(inset_viewport_builder(visible, edit));
-            assert!(!recreate);
-            assert!(!commands.iter().any(|command| matches!(
-                command,
-                egui::ViewportCommand::Decorations(_)
-                    | egui::ViewportCommand::Fullscreen(_)
-                    | egui::ViewportCommand::SetMonitor(_)
-            )));
-            assert_eq!(builder.has_shadow, Some(false));
+        assert_eq!(builder.visible, Some(false));
+        assert_eq!(builder.mouse_passthrough, Some(false));
+        // eframe patches builder deltas before explicit commands. Keeping
+        // these defaults constant prevents a premature show or disabling
+        // passthrough after the runtime synchronization has enabled it.
+        let (commands, recreate) = builder.patch(inset_viewport_builder());
+        assert!(!recreate);
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn startup_enables_passthrough_only_after_creation_and_before_showing() {
+        assert_eq!(inset_viewport_builder().mouse_passthrough, Some(false));
+        let commands = prepared_window_commands(
+            crate::windows_overlay::PreparedWindow {
+                visible: false,
+                mouse_passthrough: false,
+            },
+            true,
+            false,
+        );
+        assert!(matches!(
+            commands.as_slice(),
+            [
+                egui::ViewportCommand::MousePassthrough(true),
+                egui::ViewportCommand::Visible(true)
+            ]
+        ));
+        assert!(
+            prepared_window_commands(
+                crate::windows_overlay::PreparedWindow {
+                    visible: true,
+                    mouse_passthrough: true,
+                },
+                true,
+                false,
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn hidden_start_stays_hidden_and_later_show_preserves_passthrough() {
+        let commands = prepared_window_commands(
+            crate::windows_overlay::PreparedWindow {
+                visible: false,
+                mouse_passthrough: false,
+            },
+            false,
+            false,
+        );
+        assert!(matches!(
+            commands.as_slice(),
+            [egui::ViewportCommand::MousePassthrough(true)]
+        ));
+        let commands = prepared_window_commands(
+            crate::windows_overlay::PreparedWindow {
+                visible: false,
+                mouse_passthrough: true,
+            },
+            true,
+            false,
+        );
+        assert!(matches!(
+            commands.as_slice(),
+            [egui::ViewportCommand::Visible(true)]
+        ));
+    }
+
+    #[test]
+    fn edit_mode_changes_only_passthrough_after_startup() {
+        for (current, edit_mode) in [(true, true), (false, false)] {
+            let commands = prepared_window_commands(
+                crate::windows_overlay::PreparedWindow {
+                    visible: true,
+                    mouse_passthrough: current,
+                },
+                true,
+                edit_mode,
+            );
+            assert!(matches!(
+                commands.as_slice(),
+                [egui::ViewportCommand::MousePassthrough(value)] if *value == !edit_mode
+            ));
         }
     }
 

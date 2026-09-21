@@ -205,3 +205,45 @@ Dekorations- noch Vollbildkommandos auslösen.
 Noch nicht visuell bestätigt: Die Ein-Pixel-Umsetzung im tatsächlichen
 Zusatzfenster, einschließlich Monitorwechsel, Bearbeitungsmodus, Tray-Betrieb
 und GIF. Keine GUI-Sichtprüfung wurde vom Agenten gestartet.
+
+## Rückmeldung und Startkorrektur vom 22. September 2026
+
+Der Benutzer bestätigt für die tatsächliche Anwendung:
+- Vollbild-Vergleichsbuild: heller Streifen oben weiterhin vorhanden.
+- Ein-Pixel-Build: kein störender Rand, aber der Timer erscheint beim ersten Start
+  nicht. Aus-/Einblenden hilft nicht; Positionieren bringt die Darstellung zurück.
+
+Die Protokolle application-one-pixel-1790027543278-24152.log und
+application-one-pixel-1790027715280-5348.log zeigen bereits vor der Interaktion
+korrekte 1918×1078-Client- und Fensterflächen ab 2561/244 sowie visible=true.
+Beim Wechsel zur Positionierung ändern sich die erweiterten Stile von 0xC0138
+zu 0x40118: winit entfernt WS_EX_LAYERED und WS_EX_TRANSPARENT für den
+Bearbeitungsmodus. Die Geometrie bleibt dabei gleich. Die Protokolle enthalten
+keinen Nachweis des gezeichneten Timerinhalts.
+
+Stärkste Arbeitshypothese: Klickdurchlässigkeit wird vor Einrichtung der
+GL-Zeichenfläche aktiviert. egui-winit setzt sie direkt bei create_window,
+eframe initialisiert danach erst die zusätzliche wgpu-Zeichenfläche.
+Ein ähnliches Symptom ist upstream beschrieben:
+https://github.com/emilk/egui/issues/2537
+Der ältere Bericht beweist nicht dieselbe Ursache auf diesem System.
+
+Gezielter Fix auf codex/overlay-one-pixel:
+1. Der Builder erstellt das Overlay verborgen und ohne Klickdurchlässigkeit.
+2. Nach Rückkehr aus eframes Fenster- und Grafikinitialisierung prüft die
+   bestehende native Synchronisierung die Ein-Pixel-Geometrie.
+3. Sie aktiviert über winit die gewünschte Klickdurchlässigkeit und sendet
+   erst danach den Sichtbarkeitsbefehl.
+4. Sichtbarkeit und Klickdurchlässigkeit bleiben im Builder konstante
+   Erstellungswerte. Das ist erforderlich, weil eframe Builder-Änderungen vor
+   expliziten Viewport-Kommandos ausführt.
+5. Der tatsächliche native Zustand wird auch aus der Hintergrundlogik gelesen,
+   damit das Verfahren bei minimierter Steuerung und späterem Einblenden greift.
+
+Schatten, Ein-Pixel-Abstand, Timerposition und Renderer bleiben unverändert.
+29 Tests und Clippy ohne Warnungen bestätigen die automatischen Prüfungen;
+die Wirksamkeit gegen das konkrete visuelle Symptom ist noch manuell zu prüfen.
+
+Der neue Build heißt target\release\overlay-timer-one-pixel-startfix.exe
+(Fenstertitel mit „Startfix“). Die vorherige Ein-Pixel-EXE wurde nicht ersetzt,
+weil sie beim Bauen noch lief. Auch der Vollbild-Vergleichsbuild bleibt erhalten.
