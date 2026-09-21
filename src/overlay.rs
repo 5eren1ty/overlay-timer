@@ -5,6 +5,8 @@ use std::sync::{
 
 use eframe::egui::{self, Align2, Color32, RichText};
 
+use crate::meme::{MemeOverlay, MemePlayback};
+
 const OVERLAY_VIEWPORT_ID: &str = "overlay_timer_viewport";
 
 #[derive(Debug, Clone)]
@@ -20,12 +22,15 @@ pub struct OverlaySnapshot {
     pub edit_mode: bool,
     pub time: String,
     pub overtime: bool,
+    pub meme: Option<MemePlayback>,
+    pub meme_growth_interval_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum OverlayEvent {
     PositionChanged([f32; 2]),
     TransformChanged { position: [f32; 2], font_size: f32 },
+    ExitEditMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +121,7 @@ pub struct OverlayBridge {
     snapshot: Arc<RwLock<OverlaySnapshot>>,
     events_tx: Sender<OverlayEvent>,
     events_rx: Receiver<OverlayEvent>,
+    meme: Arc<MemeOverlay>,
 }
 
 impl OverlayBridge {
@@ -125,10 +131,18 @@ impl OverlayBridge {
             snapshot: Arc::new(RwLock::new(snapshot)),
             events_tx,
             events_rx,
+            meme: Arc::new(MemeOverlay::default()),
         }
     }
 
+    pub fn meme_error(&self) -> Option<&str> {
+        self.meme.error()
+    }
+
     pub fn update(&self, snapshot: OverlaySnapshot) {
+        if !snapshot.visible || snapshot.meme.is_none() {
+            self.meme.deactivate();
+        }
         *self
             .snapshot
             .write()
@@ -167,6 +181,7 @@ impl OverlayBridge {
             .with_resizable(false);
         let shared_snapshot = Arc::clone(&self.snapshot);
         let events_tx = self.events_tx.clone();
+        let meme = Arc::clone(&self.meme);
 
         root_ui.ctx().show_viewport_deferred(
             Self::viewport_id(),
@@ -189,6 +204,20 @@ impl OverlayBridge {
                 }
 
                 let screen_rect = overlay_ui.ctx().content_rect();
+
+                let escape_pressed = snapshot.edit_mode
+                    && overlay_ui.input(|input| input.key_pressed(egui::Key::Escape));
+                let exit_button_clicked =
+                    snapshot.edit_mode && edit_mode_exit_button(overlay_ui.ctx());
+                if escape_pressed || exit_button_clicked {
+                    let _ = events_tx.send(OverlayEvent::ExitEditMode);
+                    overlay_ui.ctx().send_viewport_cmd_to(
+                        Self::viewport_id(),
+                        egui::ViewportCommand::MousePassthrough(true),
+                    );
+                    overlay_ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
+                }
+
                 let mut area = egui::Area::new(egui::Id::new("countdown"))
                     .movable(false)
                     .interactable(snapshot.edit_mode)
@@ -207,7 +236,7 @@ impl OverlayBridge {
                     area = area.anchor(snapshot.anchor, snapshot.anchor_offset);
                 }
 
-                area.show(overlay_ui.ctx(), |ui| {
+                let timer_card = area.show(overlay_ui.ctx(), |ui| {
                     let frame_response = egui::Frame::new()
                         .fill(Color32::from_black_alpha(snapshot.background_opacity))
                         .corner_radius(12.0)
@@ -235,6 +264,7 @@ impl OverlayBridge {
                             );
                         });
 
+                    let card_rect = frame_response.response.rect;
                     if snapshot.edit_mode {
                         edit_card_transform(
                             ui,
@@ -245,7 +275,17 @@ impl OverlayBridge {
                             &events_tx,
                         );
                     }
+                    card_rect
                 });
+                if let Some(playback) = snapshot.meme {
+                    meme.paint(
+                        overlay_ui.ctx(),
+                        playback,
+                        snapshot.meme_growth_interval_seconds,
+                        screen_rect,
+                        timer_card.inner,
+                    );
+                }
             },
         );
     }
@@ -256,6 +296,27 @@ impl OverlayBridge {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
     }
+}
+
+fn edit_mode_exit_button(ctx: &egui::Context) -> bool {
+    egui::Area::new(egui::Id::new("overlay_edit_mode_exit"))
+        .anchor(Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.add(
+                egui::Button::new(
+                    RichText::new("Bearbeitung beenden  ·  Esc")
+                        .color(Color32::WHITE)
+                        .strong(),
+                )
+                .fill(Color32::from_rgb(37, 99, 235))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(147, 197, 253)))
+                .corner_radius(9.0)
+                .min_size(egui::vec2(240.0, 40.0)),
+            )
+            .clicked()
+        })
+        .inner
 }
 
 fn edit_card_transform(

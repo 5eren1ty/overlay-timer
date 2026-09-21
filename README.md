@@ -17,7 +17,7 @@ Overlay und Hotkeys laufen weiter. Ein Linksklick auf das Tray-Icon öffnet die
 Steuerung erneut; das Kontextmenü bietet außerdem Start/Pause, Reset, Overlay
 ein/aus und Beenden. Das Schließen über `X` beendet die Anwendung weiterhin.
 
-Beim Start endet der Bearbeitungsmodus automatisch. Das Overlay wird wieder vollständig klickdurchlässig, damit die Präsentation normal bedient werden kann. Eine freie Position wird relativ zur Monitorgröße gespeichert; die vier Ecken bleiben weiterhin als schnell auswählbare Presets verfügbar.
+Beim Start endet der Bearbeitungsmodus automatisch. Er kann außerdem jederzeit über die sichtbare Schaltfläche im Overlay oder lokal mit `Esc` beendet werden; `Esc` wird nicht als globaler Hotkey registriert und beeinträchtigt PowerPoint daher nicht. Das Overlay wird anschließend wieder vollständig klickdurchlässig, damit die Präsentation normal bedient werden kann. Eine freie Position wird relativ zur Monitorgröße gespeichert; die vier Ecken bleiben weiterhin als schnell auswählbare Presets verfügbar.
 
 Globale Hotkeys funktionieren auch dann, wenn PowerPoint den Fokus besitzt:
 
@@ -26,6 +26,33 @@ Globale Hotkeys funktionieren auch dann, wenn PowerPoint den Fokus besitzt:
 | `Ctrl+Alt+P` | Start/Pause |
 | `Ctrl+Alt+R` | Reset |
 | `Ctrl+Alt+O` | Overlay ein-/ausblenden |
+
+## Meme-Modus
+
+Im Steuerfenster **Meme-Modus** einschalten. Sobald der Countdown abläuft,
+spielt das eingebettete `hurry-up-judge-judy.gif` jeweils drei Sekunden an einer zufälligen Position auf dem
+gewählten Overlay-Monitor. Es startet mit 240 px Breite und wächst alle
+**4–60 Sekunden** (Standard: 5 s) um 25 % der Startgröße. Das Seitenverhältnis
+bleibt erhalten; die Größe ist auf 70 % der Bildschirmbreite und -höhe begrenzt.
+Auf kleinen Bildschirmen wird bereits die Startgröße entsprechend begrenzt.
+Bei jedem Wachstumsschritt wechselt das GIF an eine neue zufällige Position,
+auch nach Erreichen der Maximalgröße. Während der drei Sekunden bleibt es stehen,
+danach verschwindet es bis zur nächsten Stufe. Bei fünf Sekunden Stufenintervall
+sind das drei Sekunden Wiedergabe und zwei Sekunden Pause. Jede Stufe startet
+die GIF-Animation von vorne. Alte Intervalle unter vier Sekunden werden auf vier
+Sekunden angehoben, damit mindestens eine Sekunde Pause bleibt.
+Die Platzierung berücksichtigt die tatsächliche Timerkarte mit 16 px Abstand,
+auch bei freier Positionierung. Falls das große GIF nicht mehr daneben passt,
+wird die Überlappung minimiert; die Timerkarte bleibt darüber sichtbar.
+Das Overlay bleibt klickdurchlässig.
+
+Pause hält Animation, Wachstum und die Ausblendpause an; Fortsetzen setzt den Ablauf fort. Reset oder
+das Ausschalten des Meme-Modus entfernt das GIF. **Overlay ein/aus** blendet
+Timer und GIF gemeinsam aus; im Hintergrund läuft die Zeit weiter. Beim erneuten
+Einblenden oder Aktivieren während der Überziehung entspricht die Größe der
+bereits verstrichenen Überziehungszeit. Modus und Intervall werden gespeichert;
+der Meme-Modus ist anfangs ausgeschaltet. Das GIF wird in die EXE eingebettet,
+sodass beim Weitergeben keine zusätzliche GIF-Datei nötig ist.
 
 ## Bauen und starten
 

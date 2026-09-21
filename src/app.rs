@@ -8,6 +8,7 @@ use global_hotkey::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    meme::{MemePlayback, growth_interval_seconds},
     monitors::{self, MonitorInfo},
     overlay::{OverlayBridge, OverlayEvent, OverlaySnapshot},
     timer::{CountdownTimer, TimerReading, TimerState, format_reading},
@@ -124,6 +125,8 @@ struct Settings {
     background_opacity: u8,
     custom_position: Option<[f32; 2]>,
     dark_mode: bool,
+    meme_enabled: bool,
+    meme_growth_interval_seconds: u64,
 }
 
 impl Default for Settings {
@@ -139,6 +142,8 @@ impl Default for Settings {
             background_opacity: 190,
             custom_position: None,
             dark_mode: true,
+            meme_enabled: false,
+            meme_growth_interval_seconds: 5,
         }
     }
 }
@@ -204,10 +209,12 @@ pub struct OverlayTimerApp {
 
 impl OverlayTimerApp {
     pub fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
-        let settings: Settings = creation_context
+        let mut settings: Settings = creation_context
             .storage
             .and_then(|storage| eframe::get_value(storage, STORAGE_KEY))
             .unwrap_or_default();
+        settings.meme_growth_interval_seconds =
+            growth_interval_seconds(settings.meme_growth_interval_seconds);
         configure_theme(&creation_context.egui_ctx, settings.dark_mode);
 
         let timer = CountdownTimer::new(Duration::from_secs(settings.duration_seconds));
@@ -299,7 +306,7 @@ impl OverlayTimerApp {
         }
     }
 
-    fn process_overlay_events(&mut self) {
+    fn process_overlay_events(&mut self, ctx: &egui::Context) {
         for event in self.overlay.drain_events() {
             match event {
                 OverlayEvent::PositionChanged(position) => {
@@ -311,6 +318,13 @@ impl OverlayTimerApp {
                 } => {
                     self.settings.custom_position = Some(position);
                     self.settings.font_size = font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
+                }
+                OverlayEvent::ExitEditMode => {
+                    self.edit_mode = false;
+                    ctx.send_viewport_cmd_to(
+                        OverlayBridge::viewport_id(),
+                        egui::ViewportCommand::MousePassthrough(true),
+                    );
                 }
             }
         }
@@ -381,6 +395,8 @@ impl OverlayTimerApp {
                         self.show_timer_console(ui, now, palette);
                         ui.add_space(14.0);
                         self.show_output_panel(ui, palette);
+                        ui.add_space(14.0);
+                        self.show_meme_panel(ui, palette);
                         ui.add_space(10.0);
                         self.show_hotkey_help(ui, palette);
                     });
@@ -622,7 +638,7 @@ impl OverlayTimerApp {
             if self.edit_mode {
                 helper_text(
                     ui,
-                    "Timerkarte zum Verschieben ziehen; Eckgriffe skalieren.",
+                    "Timerkarte zum Verschieben ziehen; Eckgriffe skalieren. Esc beendet.",
                     palette,
                 );
             }
@@ -680,6 +696,62 @@ impl OverlayTimerApp {
                         },
                     );
                 });
+        });
+    }
+
+    fn show_meme_panel(&mut self, ui: &mut egui::Ui, palette: Palette) {
+        surface(ui, palette, 16, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Meme-Modus").color(palette.text).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    toggle_switch(ui, &mut self.settings.meme_enabled, palette)
+                        .on_hover_text("GIF nach Timerablauf einblenden");
+                });
+            });
+            helper_text(
+                ui,
+                "Judge Judy wechselt bei jedem Wachstumsschritt zufällig die Position.",
+                palette,
+            );
+            if self.settings.meme_enabled {
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Neue Stufe alle").color(palette.text));
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings.meme_growth_interval_seconds)
+                            .range(4..=60)
+                            .suffix(" s"),
+                    );
+                });
+                helper_text(
+                    ui,
+                    &format!(
+                        "3 s sichtbar · {} s Pause · jede Stufe startet das GIF neu.",
+                        self.settings.meme_growth_interval_seconds - 3
+                    ),
+                    palette,
+                );
+                helper_text(
+                    ui,
+                    "Startbreite 240 px · je Schritt +25 % der Startgröße · maximal 70 % des Bildschirms.",
+                    palette,
+                );
+                helper_text(
+                    ui,
+                    "Die Timerkarte bleibt möglichst frei. Pause hält das Meme an; Reset entfernt es.",
+                    palette,
+                );
+                if !self.settings.overlay_visible {
+                    helper_text(ui, "Zum Anzeigen das Overlay einschalten.", palette);
+                }
+                if let Some(error) = self.overlay.meme_error() {
+                    error_box(
+                        ui,
+                        &format!("GIF konnte nicht geladen werden: {error}"),
+                        palette,
+                    );
+                }
+            }
         });
     }
 
@@ -768,7 +840,14 @@ impl eframe::App for OverlayTimerApp {
         let now = Instant::now();
         let overlay_was_visible = self.settings.overlay_visible;
         self.handle_minimize(ctx);
-        self.process_overlay_events();
+        self.process_overlay_events(ctx);
+        if self.edit_mode && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.edit_mode = false;
+            ctx.send_viewport_cmd_to(
+                OverlayBridge::viewport_id(),
+                egui::ViewportCommand::MousePassthrough(true),
+            );
+        }
         self.process_hotkeys(now);
         self.process_tray(ctx, now);
         self.sync_tray(now);
@@ -809,6 +888,10 @@ fn overlay_snapshot(
         edit_mode,
         time: format_reading(reading),
         overtime: reading.is_overtime(),
+        meme: MemePlayback::new(settings.meme_enabled, reading, timer.is_running(), now),
+        meme_growth_interval_seconds: growth_interval_seconds(
+            settings.meme_growth_interval_seconds,
+        ),
     }
 }
 
