@@ -176,6 +176,15 @@ impl OverlayBridge {
 
     pub fn show(&self, root_ui: &mut egui::Ui) {
         let snapshot = self.snapshot();
+        let geometry = crate::windows_overlay::target_rect(snapshot.monitor_index)
+            .ok()
+            .map(
+                |[x, y, width, height]| egui_winit::physical_creation::Geometry {
+                    position: winit::dpi::PhysicalPosition::new(x, y),
+                    size: winit::dpi::PhysicalSize::new(width as u32, height as u32),
+                },
+            );
+        egui_winit::physical_creation::set(root_ui.ctx(), "Overlay Timer", geometry);
         let ready = self.sync_native(root_ui.ctx());
         let viewport = inset_viewport_builder(snapshot.visible && ready, snapshot.edit_mode);
         let shared_snapshot = Arc::clone(&self.snapshot);
@@ -308,8 +317,9 @@ fn inset_viewport_builder(visible: bool, edit_mode: bool) -> egui::ViewportBuild
         .with_active(false)
         .with_visible(visible)
         .with_resizable(false)
-        // Only an invisible creation size. Native physical placement is verified
-        // before showing; never use with_monitor (which implies fullscreen).
+        // Fallback only for an unavailable monitor (the native guard keeps it
+        // hidden). For a valid monitor physical_creation overrides these
+        // attributes before window creation and skips the later logical resize.
         .with_inner_size([800.0, 450.0])
 }
 
@@ -581,6 +591,59 @@ mod tests {
             )));
             assert_eq!(builder.has_shadow, Some(false));
         }
+    }
+
+    #[test]
+    fn creation_geometry_is_physical_and_does_not_reapply_logical_fallback() {
+        use winit::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
+        for [x, y, width, height] in [[2561, 244, 1918, 1078], [-2559, -1439, 2558, 1438]] {
+            let ctx = egui::Context::default();
+            ctx.set_zoom_factor(1.5);
+            let position = PhysicalPosition::new(x, y);
+            let size = PhysicalSize::new(width as u32, height as u32);
+            egui_winit::physical_creation::set(
+                &ctx,
+                "Overlay Timer",
+                Some(egui_winit::physical_creation::Geometry { position, size }),
+            );
+            let builder = inset_viewport_builder(false, false);
+            let (attributes, after) = egui_winit::physical_creation::prepare(&ctx, &builder);
+            assert_eq!(attributes.position, Some(Position::Physical(position)));
+            assert_eq!(attributes.inner_size, Some(Size::Physical(size)));
+            assert!(!attributes.visible);
+            assert!(!attributes.active);
+            assert!(attributes.transparent);
+            assert!(attributes.fullscreen.is_none());
+            assert!(after.inner_size.is_none());
+            assert!(after.position.is_none());
+            assert_eq!(after.mouse_passthrough, builder.mouse_passthrough);
+            assert_eq!(after.has_shadow, Some(false));
+        }
+    }
+
+    #[test]
+    fn creation_override_is_scoped_and_can_be_cleared() {
+        let ctx = egui::Context::default();
+        egui_winit::physical_creation::set(
+            &ctx,
+            "Overlay Timer",
+            Some(egui_winit::physical_creation::Geometry {
+                position: winit::dpi::PhysicalPosition::new(1, 1),
+                size: winit::dpi::PhysicalSize::new(1918, 1078),
+            }),
+        );
+        for builder in [
+            inset_viewport_builder(false, false).with_title("Controller"),
+            inset_viewport_builder(false, false).with_fullscreen(true),
+            inset_viewport_builder(false, false).with_monitor(0),
+        ] {
+            let (_, after) = egui_winit::physical_creation::prepare(&ctx, &builder);
+            assert_eq!(after.inner_size, Some(egui::vec2(800.0, 450.0)));
+        }
+        egui_winit::physical_creation::set(&ctx, "Overlay Timer", None);
+        let (_, after) =
+            egui_winit::physical_creation::prepare(&ctx, &inset_viewport_builder(false, false));
+        assert_eq!(after.inner_size, Some(egui::vec2(800.0, 450.0)));
     }
 
     #[test]

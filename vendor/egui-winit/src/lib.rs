@@ -21,6 +21,7 @@ use egui::{Pos2, Rect, Theme, Vec2, ViewportBuilder, ViewportCommand, ViewportId
 pub use winit;
 
 pub mod clipboard;
+pub mod physical_creation;
 mod dropped_file;
 mod safe_area;
 mod window_settings;
@@ -1971,7 +1972,8 @@ pub fn create_window(
 ) -> Result<Window, winit::error::OsError> {
     profiling::function_scope!();
 
-    let mut window_attributes = create_winit_window_attributes(egui_ctx, viewport_builder.clone());
+    let (mut window_attributes, after_creation) =
+        physical_creation::prepare(egui_ctx, viewport_builder);
 
     // Resolve target monitor index → MonitorHandle, so the window is created
     // directly in borderless fullscreen on the requested output. This is the
@@ -1990,7 +1992,7 @@ pub fn create_window(
     }
 
     let window = event_loop.create_window(window_attributes)?;
-    apply_viewport_builder_to_window(egui_ctx, &window, viewport_builder);
+    apply_viewport_builder_to_window(egui_ctx, &window, &after_creation);
     Ok(window)
 }
 

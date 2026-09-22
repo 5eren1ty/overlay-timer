@@ -1,22 +1,29 @@
-# Local patch: explicit Windows shadow at window creation
+# Local egui-winit changes
 
 Upstream: egui-winit 0.36.1, egui commit
 4c1f2fae95475a40e524884ebb298bcb1714b08e, crates/egui-winit.
+Upstream licenses are included unchanged; Cargo.toml adjusts their local paths.
 
-Only the Windows window-attribute construction in src/lib.rs is changed:
-ViewportBuilder.has_shadow, when specified, overrides the default
-!decorations value for with_undecorated_shadow. An absent value retains upstream
-behavior. Cargo.toml only adjusts packaged license paths to this directory.
+## Existing Windows shadow option
 
-The application keeps decorations(false) and has_shadow(false) constant for the
-inset overlay. Visibility and mouse-passthrough commands preserve winit's stored
-shadow flag. A future explicit Decorations command still follows upstream's
-automatic shadow behavior: this is not a complete new cross-platform API.
-The application tests ensure its edit/visibility transitions emit no such
-command. A has_shadow change recreates a viewport through upstream egui logic.
+The Windows attribute construction honors ViewportBuilder.has_shadow when set,
+otherwise retaining upstream !decorations behavior. Runtime Decorations commands
+still follow upstream shadow behavior. The application keeps decorations(false)
+and has_shadow(false) constant.
 
-No WM_NCCALCSIZE subclass, no renderer changes and no fullscreen shadow removal
-are part of this patch. The inset overlay starts hidden and is positioned and
-verified before it is shown.
+## Initial physical geometry experiment
 
-Upstream licenses are included unchanged.
+The local physical_creation module allows an application to register physical
+client size and outer position by exact window title within its egui Context.
+create_window uses these attributes before calling event_loop.create_window.
+It then omits only position/inner_size from the post-creation builder application,
+so the logical fallback cannot resize the new window before surface creation.
+Mouse passthrough is still applied in its original position in the sequence.
+
+Unregistered titles, fullscreen/monitor-selected windows, and existing windows
+retain their original behavior. Clearing the registration removes the override.
+The application registers only its normal inset overlay.
+
+No renderer, visibility, activation, shadow timing or passthrough timing changes
+are part of this experiment. Native correction for subsequent monitor changes
+is retained and any actual correction is logged explicitly.

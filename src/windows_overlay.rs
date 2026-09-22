@@ -66,12 +66,25 @@ fn outer_rect(hwnd: HWND) -> Result<[i32; 4], String> {
     ])
 }
 
-fn prepare(hwnd: HWND, monitor_index: usize) -> Result<PreparedWindow, String> {
+pub fn target_rect(monitor_index: usize) -> Result<[i32; 4], String> {
     let monitors = crate::monitors::enumerate();
     let monitor = monitors.get(monitor_index)
         .ok_or("Der ausgewählte Monitor ist nicht mehr verfügbar. Bitte die Bildschirmliste aktualisieren.")?;
-    let target = inset_rect(monitor)?;
-    if outer_rect(hwnd)? != target {
+    inset_rect(monitor)
+}
+
+fn prepare(hwnd: HWND, monitor_index: usize) -> Result<PreparedWindow, String> {
+    let target = target_rect(monitor_index)?;
+    let before = outer_rect(hwnd)?;
+    if before != target {
+        // A correction at startup means creation geometry did not match.
+        // Keep the existing correction for monitor changes, but make it visible
+        // in the log rather than masking an unsuccessful experiment.
+        crate::window_trace::record(
+            hwnd,
+            "one-pixel-initial-size",
+            &format!("geometry_correction before={before:?} target={target:?}"),
+        );
         // SAFETY: Sets only the geometry of our own overlay. No activation,
         // z-order change or fullscreen/style transition is requested.
         unsafe {
@@ -121,7 +134,7 @@ fn prepare(hwnd: HWND, monitor_index: usize) -> Result<PreparedWindow, String> {
     };
     crate::window_trace::record(
         hwnd,
-        "one-pixel",
+        "one-pixel-initial-size",
         &format!("target={target:?} dwm_border_none={border_result:?}"),
     );
     // SAFETY: Querying our existing overlay's visibility.
@@ -139,7 +152,7 @@ pub fn prepare_overlay(monitor_index: usize) -> Result<Option<PreparedWindow>, S
     match prepare(hwnd, monitor_index) {
         Ok(window) => Ok(Some(window)),
         Err(error) => {
-            crate::window_trace::record(hwnd, "one-pixel", &format!("ERROR: {error}"));
+            crate::window_trace::record(hwnd, "one-pixel-initial-size", &format!("ERROR: {error}"));
             Err(error)
         }
     }

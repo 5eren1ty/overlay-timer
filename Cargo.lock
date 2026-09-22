@@ -2357,6 +2357,7 @@ name = "overlay-timer"
 version = "0.2.1"
 dependencies = [
  "eframe",
+ "egui-winit",
  "global-hotkey",
  "image",
  "serde",

@@ -114,3 +114,12 @@ target\release\overlay-timer-one-pixel-restored.exe; der Anwendungscode
 entspricht wieder fb4ee9e. Das Problem des beim Start unsichtbaren Timers ist
 noch offen. overlay-timer-one-pixel-startfix.exe ist ein fehlgeschlagener Versuch
 und soll nicht für weitere reguläre Tests verwendet werden.
+
+## Inkrementeller Versuch 1: richtige Startgröße
+
+Branch codex/overlay-initial-size erzeugt das Ein-Pixel-Overlay bereits mit
+endgültiger physischer Größe und Position vor der Grafikinitialisierung.
+Die übrigen Fenstereinstellungen bleiben auf dem wiederhergestellten Stand.
+Separater Build: target\release\overlay-timer-one-pixel-step1.exe.
+Referenz, Testablauf und Protokollauswertung stehen in
+[OVERLAY_EXPERIMENTS.md](OVERLAY_EXPERIMENTS.md).
