@@ -97,3 +97,19 @@ Positionieren auf den Timer achten. Transparenz und oberen Rand kontrollieren,
 danach Overlay aus/an sowie Positionierung an/aus prüfen.
 28 Tests erfolgreich, Clippy ohne Warnungen und Release-Build erfolgreich.
 Sichtprüfung offen; keine GUI vom Agenten gestartet.
+
+### Ergebnis von Versuch 2: vom Benutzer bestätigt
+
+Der Benutzer bestätigt den Step2-Build (380e444) als funktionierende Lösung:
+„Das war die richtige notwendige Anpassung“.
+
+Damit ist die Kombination aus endgültiger physischer Startgeometrie (Versuch 1)
+und direkter Sichtbarkeit bei der Fenstererstellung (Versuch 2) die bestätigte
+Referenz für weitere Arbeit. Die Startgröße allein genügte nicht. Der Test
+belegt nicht, ob direkte Sichtbarkeit auch ohne die Änderung aus Versuch 1
+genügen würde, und beweist keine bestimmte interne Treiberursache.
+
+Die funktionierende Startreihenfolge beibehalten: normales Ein-Pixel-Fenster,
+korrekte physische Geometrie bei Erstellung, bei „Overlay an“ direkt sichtbar,
+Schatten aus und Klickdurchlässigkeit wie im Step2-Build. Weitere Änderungen
+an der Fensterinitialisierung sind für das gemeldete Problem nicht erforderlich.
