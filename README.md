@@ -55,8 +55,8 @@ Pause hält Animation, Wachstum und die Ausblendpause an; Fortsetzen setzt den A
 das Ausschalten des Meme-Modus entfernt das GIF. **Overlay ein/aus** blendet
 Timer und GIF gemeinsam aus; im Hintergrund läuft die Zeit weiter. Beim erneuten
 Einblenden oder Aktivieren während der Überziehung entspricht die Größe der
-bereits verstrichenen Überziehungszeit. Modus und Intervall werden gespeichert;
-der Meme-Modus ist anfangs ausgeschaltet. Das GIF wird in die EXE eingebettet,
+bereits verstrichenen Überziehungszeit. Das Intervall wird gespeichert, der
+Meme-Modus selbst startet bei jedem Programmstart ausgeschaltet. Das GIF wird in die EXE eingebettet,
 sodass beim Weitergeben keine zusätzliche GIF-Datei nötig ist.
 
 ## Bauen und starten

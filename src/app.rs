@@ -125,6 +125,7 @@ struct Settings {
     background_opacity: u8,
     custom_position: Option<[f32; 2]>,
     dark_mode: bool,
+    #[serde(skip)]
     meme_enabled: bool,
     meme_growth_interval_seconds: u64,
 }
@@ -1185,4 +1186,28 @@ fn error_box(ui: &mut egui::Ui, text: &str, palette: Palette) {
         .show(ui, |ui| {
             ui.label(RichText::new(text).color(palette.error));
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn meme_mode_is_never_persisted_or_restored() {
+        let mut settings = Settings {
+            meme_enabled: true,
+            ..Settings::default()
+        };
+
+        let mut stored = serde_json::to_value(&settings).unwrap();
+        assert!(stored.get("meme_enabled").is_none());
+
+        stored
+            .as_object_mut()
+            .unwrap()
+            .insert("meme_enabled".into(), serde_json::Value::Bool(true));
+        settings = serde_json::from_value(stored).unwrap();
+
+        assert!(!settings.meme_enabled);
+    }
 }
