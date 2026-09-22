@@ -575,16 +575,10 @@ fn synchronize_native(
 }
 
 fn timer_text_galley(ui: &egui::Ui, text: &str, font_size: f32) -> Arc<egui::Galley> {
-    let text: egui::WidgetText = RichText::new(text)
-        .size(font_size)
-        .strong()
-        .monospace()
-        .into();
-    text.into_galley(
-        ui,
-        Some(egui::TextWrapMode::Extend),
-        f32::INFINITY,
-        egui::FontSelection::Default,
+    ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::monospace(font_size),
+        Color32::PLACEHOLDER,
     )
 }
 
@@ -1082,6 +1076,13 @@ mod tests {
 
             assert!(overtime.size().x > remaining.size().x);
             assert!((overtime.size().y - remaining.size().y).abs() < 0.001);
+            assert!(
+                overtime
+                    .job
+                    .sections
+                    .iter()
+                    .all(|section| { section.format.color == Color32::PLACEHOLDER })
+            );
         });
         output.textures_delta.clear();
     }
