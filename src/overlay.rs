@@ -185,8 +185,14 @@ impl OverlayBridge {
                 },
             );
         egui_winit::physical_creation::set(root_ui.ctx(), "Overlay Timer", geometry);
-        let ready = self.sync_native(root_ui.ctx());
-        let viewport = inset_viewport_builder(snapshot.visible && ready, snapshot.edit_mode);
+        self.sync_native(root_ui.ctx());
+        // Step 2: a valid target geometry is enough to create the overlay
+        // visible. Do not wait for an HWND that can only exist after creation.
+        // Retain the native error guard for an existing, invalid window.
+        let viewport = inset_viewport_builder(
+            snapshot.visible && geometry.is_some() && self.native_error().is_none(),
+            snapshot.edit_mode,
+        );
         let shared_snapshot = Arc::clone(&self.snapshot);
         let events_tx = self.events_tx.clone();
         let meme = Arc::clone(&self.meme);
@@ -606,18 +612,20 @@ mod tests {
                 "Overlay Timer",
                 Some(egui_winit::physical_creation::Geometry { position, size }),
             );
-            let builder = inset_viewport_builder(false, false);
-            let (attributes, after) = egui_winit::physical_creation::prepare(&ctx, &builder);
-            assert_eq!(attributes.position, Some(Position::Physical(position)));
-            assert_eq!(attributes.inner_size, Some(Size::Physical(size)));
-            assert!(!attributes.visible);
-            assert!(!attributes.active);
-            assert!(attributes.transparent);
-            assert!(attributes.fullscreen.is_none());
-            assert!(after.inner_size.is_none());
-            assert!(after.position.is_none());
-            assert_eq!(after.mouse_passthrough, builder.mouse_passthrough);
-            assert_eq!(after.has_shadow, Some(false));
+            for visible in [false, true] {
+                let builder = inset_viewport_builder(visible, false);
+                let (attributes, after) = egui_winit::physical_creation::prepare(&ctx, &builder);
+                assert_eq!(attributes.position, Some(Position::Physical(position)));
+                assert_eq!(attributes.inner_size, Some(Size::Physical(size)));
+                assert_eq!(attributes.visible, visible);
+                assert!(!attributes.active);
+                assert!(attributes.transparent);
+                assert!(attributes.fullscreen.is_none());
+                assert!(after.inner_size.is_none());
+                assert!(after.position.is_none());
+                assert_eq!(after.mouse_passthrough, Some(true));
+                assert_eq!(after.has_shadow, Some(false));
+            }
         }
     }
 

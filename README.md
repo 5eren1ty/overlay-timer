@@ -123,3 +123,11 @@ Die übrigen Fenstereinstellungen bleiben auf dem wiederhergestellten Stand.
 Separater Build: target\release\overlay-timer-one-pixel-step1.exe.
 Referenz, Testablauf und Protokollauswertung stehen in
 [OVERLAY_EXPERIMENTS.md](OVERLAY_EXPERIMENTS.md).
+
+## Inkrementeller Versuch 2: direkt sichtbar starten
+
+Branch codex/overlay-visible-start baut auf Versuch 1 auf. Bei „Overlay an“
+wird das Fenster bereits sichtbar erstellt; die übrigen Einstellungen bleiben
+erhalten. Separater Build: target\release\overlay-timer-one-pixel-step2.exe.
+Vor dem Test ältere Instanzen vollständig beenden. Ablauf und Protokollpfad
+stehen in [OVERLAY_EXPERIMENTS.md](OVERLAY_EXPERIMENTS.md).

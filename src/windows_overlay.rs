@@ -1,5 +1,5 @@
 //! Physical inset geometry for the normal, shadowless overlay window.
-//! Visibility is controlled through egui only after preparation has succeeded.
+//! Creation uses the registered target geometry; runtime checks can hide an invalid window.
 use std::{ffi::c_void, mem::size_of};
 
 use windows::{
@@ -82,7 +82,7 @@ fn prepare(hwnd: HWND, monitor_index: usize) -> Result<PreparedWindow, String> {
         // in the log rather than masking an unsuccessful experiment.
         crate::window_trace::record(
             hwnd,
-            "one-pixel-initial-size",
+            "one-pixel-visible-start",
             &format!("geometry_correction before={before:?} target={target:?}"),
         );
         // SAFETY: Sets only the geometry of our own overlay. No activation,
@@ -134,7 +134,7 @@ fn prepare(hwnd: HWND, monitor_index: usize) -> Result<PreparedWindow, String> {
     };
     crate::window_trace::record(
         hwnd,
-        "one-pixel-initial-size",
+        "one-pixel-visible-start",
         &format!("target={target:?} dwm_border_none={border_result:?}"),
     );
     // SAFETY: Querying our existing overlay's visibility.
@@ -143,8 +143,8 @@ fn prepare(hwnd: HWND, monitor_index: usize) -> Result<PreparedWindow, String> {
     })
 }
 
-/// None means the deferred viewport has not been created yet. The caller
-/// keeps it hidden, then retries from App::logic even if the controller is hidden.
+/// None means the deferred viewport has not been created yet. Its registered
+/// geometry determines creation; App::logic retries these checks even in the tray.
 pub fn prepare_overlay(monitor_index: usize) -> Result<Option<PreparedWindow>, String> {
     let Some(hwnd) = find_overlay() else {
         return Ok(None);
@@ -152,7 +152,11 @@ pub fn prepare_overlay(monitor_index: usize) -> Result<Option<PreparedWindow>, S
     match prepare(hwnd, monitor_index) {
         Ok(window) => Ok(Some(window)),
         Err(error) => {
-            crate::window_trace::record(hwnd, "one-pixel-initial-size", &format!("ERROR: {error}"));
+            crate::window_trace::record(
+                hwnd,
+                "one-pixel-visible-start",
+                &format!("ERROR: {error}"),
+            );
             Err(error)
         }
     }

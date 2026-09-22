@@ -858,8 +858,8 @@ impl eframe::App for OverlayTimerApp {
         self.process_tray(ctx, now);
         self.sync_tray(now);
         self.sync_overlay(now);
-        // Also runs while the controller is in the tray: a hidden, newly
-        // created overlay must be prepared before its first Visible command.
+        // Keep native geometry and visibility checks running even while the
+        // controller is in the tray.
         self.overlay.sync_native(ctx);
         OverlayBridge::request_repaint(ctx);
         ctx.request_repaint_after(Duration::from_millis(100));
