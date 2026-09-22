@@ -206,44 +206,42 @@ Noch nicht visuell bestätigt: Die Ein-Pixel-Umsetzung im tatsächlichen
 Zusatzfenster, einschließlich Monitorwechsel, Bearbeitungsmodus, Tray-Betrieb
 und GIF. Keine GUI-Sichtprüfung wurde vom Agenten gestartet.
 
-## Rückmeldung und Startkorrektur vom 22. September 2026
+## Startfix vom 22. September verworfen
 
-Der Benutzer bestätigt für die tatsächliche Anwendung:
-- Vollbild-Vergleichsbuild: heller Streifen oben weiterhin vorhanden.
-- Ein-Pixel-Build: kein störender Rand, aber der Timer erscheint beim ersten Start
-  nicht. Aus-/Einblenden hilft nicht; Positionieren bringt die Darstellung zurück.
+Der Benutzer bestätigt: Der ursprüngliche Ein-Pixel-Build (fb4ee9e) ist
+transparent und ohne störenden Rand. Sein Timer erscheint beim ersten Start
+allerdings erst nach Aktivieren der Positionierung; Aus-/Einblenden hilft nicht.
+Die genaue auslösende Bedienhandlung ist noch nicht abschließend abgegrenzt.
 
-Die Protokolle application-one-pixel-1790027543278-24152.log und
-application-one-pixel-1790027715280-5348.log zeigen bereits vor der Interaktion
-korrekte 1918×1078-Client- und Fensterflächen ab 2561/244 sowie visible=true.
-Beim Wechsel zur Positionierung ändern sich die erweiterten Stile von 0xC0138
-zu 0x40118: winit entfernt WS_EX_LAYERED und WS_EX_TRANSPARENT für den
-Bearbeitungsmodus. Die Geometrie bleibt dabei gleich. Die Protokolle enthalten
-keinen Nachweis des gezeichneten Timerinhalts.
+Der Versuch 98f6cac änderte die Klickdurchlässigkeit:
+- Vorher: mouse_passthrough=true bereits beim Erstellen des Fensters.
+- Versuch: zunächst false, dann true nach Einrichtung der Grafikfläche und
+  Prüfung der nativen Geometrie, vor dem Sichtbarkeitskommando.
+- Zusätzlich wurden Sichtbarkeit und Klickdurchlässigkeit aus konstanten
+  Builder-Erstellungswerten heraus über native Zustandsprüfungen synchronisiert.
+- Schatten, Ein-Pixel-Abstand und GL-Renderer wurden nicht verändert.
 
-Stärkste Arbeitshypothese: Klickdurchlässigkeit wird vor Einrichtung der
-GL-Zeichenfläche aktiviert. egui-winit setzt sie direkt bei create_window,
-eframe initialisiert danach erst die zusätzliche wgpu-Zeichenfläche.
-Ein ähnliches Symptom ist upstream beschrieben:
-https://github.com/emilk/egui/issues/2537
-Der ältere Bericht beweist nicht dieselbe Ursache auf diesem System.
+Ergebnis laut Benutzer: Der gesamte Overlay-Hintergrund wird wieder schwarz.
+Die zugrunde liegende Vermutung war unbewiesen und ist keine tragfähige Lösung.
+Der Versuch ist vollständig zurückgenommen. Der Anwendungscode entspricht
+wieder fb4ee9e; das ursprüngliche Problem des zunächst unsichtbaren Timers ist
+damit ausdrücklich noch offen. Keine weitere Fensterinitialisierung geändert.
 
-Gezielter Fix auf codex/overlay-one-pixel:
-1. Der Builder erstellt das Overlay verborgen und ohne Klickdurchlässigkeit.
-2. Nach Rückkehr aus eframes Fenster- und Grafikinitialisierung prüft die
-   bestehende native Synchronisierung die Ein-Pixel-Geometrie.
-3. Sie aktiviert über winit die gewünschte Klickdurchlässigkeit und sendet
-   erst danach den Sichtbarkeitsbefehl.
-4. Sichtbarkeit und Klickdurchlässigkeit bleiben im Builder konstante
-   Erstellungswerte. Das ist erforderlich, weil eframe Builder-Änderungen vor
-   expliziten Viewport-Kommandos ausführt.
-5. Der tatsächliche native Zustand wird auch aus der Hintergrundlogik gelesen,
-   damit das Verfahren bei minimierter Steuerung und späterem Einblenden greift.
+Der Versuch entsprach auch nicht der Diagnoseinitialisierung: Dort steht
+Klickdurchlässigkeit schon im ursprünglichen Builder auf true. Die Diagnose
+erzeugt ein eigenes Root-Fenster, schaltet den Schatten danach explizit aus und
+zeichnet die Karte direkt über einen Painter. Die Hauptanwendung verwendet
+einen zusätzlichen Viewport, schaltet den Schatten schon beim Erstellen aus und
+zeichnet den Timer in einer egui Area. Diese Unterschiede sind Anhaltspunkte,
+keiner ist als alleinige Ursache bewiesen.
 
-Schatten, Ein-Pixel-Abstand, Timerposition und Renderer bleiben unverändert.
-29 Tests und Clippy ohne Warnungen bestätigen die automatischen Prüfungen;
-die Wirksamkeit gegen das konkrete visuelle Symptom ist noch manuell zu prüfen.
+application-one-pixel-1790027543278-24152.log und
+application-one-pixel-1790027715280-5348.log zeigen für den vorherigen Build
+korrekte 1918×1078-Client- und Fensterflächen ab 2561/244 sowie visible=true
+bereits vor dem Positionieren. Sie belegen nicht den gezeichneten Timerinhalt.
 
-Der neue Build heißt target\release\overlay-timer-one-pixel-startfix.exe
-(Fenstertitel mit „Startfix“). Die vorherige Ein-Pixel-EXE wurde nicht ersetzt,
-weil sie beim Bauen noch lief. Auch der Vollbild-Vergleichsbuild bleibt erhalten.
+Nicht erneut als Lösung verwenden: Klickdurchlässigkeit erst nach Erstellen
+der GL-Zeichenfläche aktivieren. Erfolgreiche Unit-Tests/Builds waren kein
+Nachweis der Windows-/Treibertransparenz.
+Wiederhergestellter Build: target\release\overlay-timer-one-pixel-restored.exe.
+Die Datei overlay-timer-one-pixel-startfix.exe ist ein fehlgeschlagener Versuch.
