@@ -30,17 +30,19 @@ Globale Hotkeys funktionieren auch dann, wenn PowerPoint den Fokus besitzt:
 ## Meme-Modus
 
 Im Steuerfenster **Meme-Modus** einschalten. Sobald der Countdown abläuft,
-spielt das eingebettete `hurry-up-judge-judy.gif` jeweils drei Sekunden an einer zufälligen Position auf dem
+spielt das eingebettete `hurry-up-judge-judy.gif` jeweils genau einen Durchlauf (1,8 Sekunden) an einer zufälligen Position auf dem
 gewählten Overlay-Monitor. Es startet mit 240 px Breite und wächst alle
-**4–60 Sekunden** (Standard: 5 s) um 25 % der Startgröße. Das Seitenverhältnis
+**2–60 Sekunden** (Standard: 5 s) um 25 % der Startgröße. Das Seitenverhältnis
 bleibt erhalten; die Größe ist auf 70 % der Bildschirmbreite und -höhe begrenzt.
 Auf kleinen Bildschirmen wird bereits die Startgröße entsprechend begrenzt.
 Bei jedem Wachstumsschritt wechselt das GIF an eine neue zufällige Position,
-auch nach Erreichen der Maximalgröße. Während der drei Sekunden bleibt es stehen,
+auch nach Erreichen der Maximalgröße. Während des Durchlaufs bleibt es stehen,
 danach verschwindet es bis zur nächsten Stufe. Bei fünf Sekunden Stufenintervall
-sind das drei Sekunden Wiedergabe und zwei Sekunden Pause. Jede Stufe startet
-die GIF-Animation von vorne. Alte Intervalle unter vier Sekunden werden auf vier
-Sekunden angehoben, damit mindestens eine Sekunde Pause bleibt.
+sind das 1,8 Sekunden Wiedergabe und 3,2 Sekunden Pause. Bei zwei Sekunden
+Stufenintervall bleiben 0,2 Sekunden Pause. Die Wiedergabedauer wird aus den
+Einzelbildzeiten des GIFs ermittelt; die Loop-Angabe wird ignoriert. Jede Stufe
+startet die GIF-Animation von vorne. Intervalle unter zwei Sekunden werden auf
+zwei Sekunden angehoben.
 Die Platzierung berücksichtigt die tatsächliche Timerkarte mit 16 px Abstand,
 auch bei freier Positionierung. Falls das große GIF nicht mehr daneben passt,
 wird die Überlappung minimiert; die Timerkarte bleibt darüber sichtbar.

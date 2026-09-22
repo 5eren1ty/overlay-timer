@@ -715,37 +715,19 @@ impl OverlayTimerApp {
                         .on_hover_text("GIF nach Timerablauf einblenden");
                 });
             });
-            helper_text(
-                ui,
-                "Judge Judy wechselt bei jedem Wachstumsschritt zufällig die Position.",
-                palette,
-            );
             if self.settings.meme_enabled {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Neue Stufe alle").color(palette.text));
                     ui.add(
                         egui::DragValue::new(&mut self.settings.meme_growth_interval_seconds)
-                            .range(4..=60)
+                            .range(2..=60)
                             .suffix(" s"),
                     );
                 });
                 helper_text(
                     ui,
-                    &format!(
-                        "3 s sichtbar · {} s Pause · jede Stufe startet das GIF neu.",
-                        self.settings.meme_growth_interval_seconds - 3
-                    ),
-                    palette,
-                );
-                helper_text(
-                    ui,
-                    "Startbreite 240 px · je Schritt +25 % der Startgröße · maximal 70 % des Bildschirms.",
-                    palette,
-                );
-                helper_text(
-                    ui,
-                    "Die Timerkarte bleibt möglichst frei. Pause hält das Meme an; Reset entfernt es.",
+                    "Ein GIF-Durchlauf · Pause bis zur nächsten Stufe.",
                     palette,
                 );
                 if !self.settings.overlay_visible {

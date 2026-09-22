@@ -14,11 +14,9 @@ use crate::timer::TimerReading;
 // Bundled into the executable so the GIF also works outside the project folder.
 const MEME_GIF: &[u8] = include_bytes!("../hurry-up-judge-judy.gif");
 
-const PLAY_DURATION: Duration = Duration::from_secs(3);
-
 pub fn growth_interval_seconds(configured: u64) -> u64 {
-    // Always leave at least one second between three-second appearances.
-    configured.clamp(4, 60)
+    // The bundled GIF takes 1.8 seconds, leaving a gap even at the minimum.
+    configured.clamp(2, 60)
 }
 
 fn elapsed_in_stage(elapsed: Duration, interval: u64) -> Duration {
@@ -87,18 +85,6 @@ impl MemeOverlay {
         screen: egui::Rect,
         timer: egui::Rect,
     ) {
-        let elapsed = playback.elapsed(Instant::now());
-        let stage_elapsed = elapsed_in_stage(elapsed, interval);
-        if stage_elapsed >= PLAY_DURATION {
-            if playback.running {
-                ctx.request_repaint_after(
-                    Duration::from_secs(growth_interval_seconds(interval)) - stage_elapsed,
-                );
-            }
-            // Do not paint or upload frames during the gap. Keep the previous
-            // position so the next stage can deliberately choose a different one.
-            return;
-        }
         let animation = self
             .animation
             .get_or_init(|| GifAnimation::decode(MEME_GIF).map(Mutex::new));
@@ -106,7 +92,18 @@ impl MemeOverlay {
         let mut animation = animation
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let index = animation.frame_index(stage_elapsed);
+        let elapsed = playback.elapsed(Instant::now());
+        let stage_elapsed = elapsed_in_stage(elapsed, interval);
+        let Some(index) = animation.frame_index(stage_elapsed) else {
+            if playback.running {
+                ctx.request_repaint_after(
+                    Duration::from_secs(growth_interval_seconds(interval)) - stage_elapsed,
+                );
+            }
+            // A complete pass is over: paint nothing until the next stage,
+            // keeping the old position so its replacement can move elsewhere.
+            return;
+        };
         if animation.current_frame != Some(index) {
             let image = animation.frames[index].image.clone();
             if let Some(texture) = animation.texture.as_mut() {
@@ -305,10 +302,12 @@ impl GifAnimation {
         })
     }
 
-    fn frame_index(&self, elapsed: Duration) -> usize {
-        let position = elapsed.as_nanos() % self.duration.as_nanos();
-        self.frames
-            .partition_point(|frame| frame.ends_at.as_nanos() <= position)
+    fn frame_index(&self, elapsed: Duration) -> Option<usize> {
+        // GIF loop metadata is deliberately ignored: one pass per stage.
+        (elapsed < self.duration).then(|| {
+            self.frames
+                .partition_point(|frame| frame.ends_at <= elapsed)
+        })
     }
 }
 
@@ -331,13 +330,19 @@ mod tests {
     use crate::timer::CountdownTimer;
 
     #[test]
-    fn bundled_gif_decodes_animates_and_loops() {
+    fn bundled_gif_plays_one_complete_pass_without_looping() {
         let animation = GifAnimation::decode(MEME_GIF).unwrap();
         assert!(animation.frames.len() > 1);
         assert!(animation.size.x > 0.0 && animation.size.y > 0.0);
-        assert_eq!(animation.frame_index(Duration::ZERO), 0);
-        assert_eq!(animation.frame_index(animation.frames[0].ends_at), 1);
-        assert_eq!(animation.frame_index(animation.duration), 0);
+        assert_eq!(animation.frame_index(Duration::ZERO), Some(0));
+        assert_eq!(animation.frame_index(animation.frames[0].ends_at), Some(1));
+        assert_eq!(animation.duration, Duration::from_millis(1_800));
+        assert_eq!(
+            animation.frame_index(animation.duration - Duration::from_nanos(1)),
+            Some(animation.frames.len() - 1)
+        );
+        assert_eq!(animation.frame_index(animation.duration), None);
+        assert_eq!(animation.frame_index(animation.duration * 2), None);
         assert!(
             animation
                 .frames
@@ -413,71 +418,50 @@ mod tests {
 
     #[test]
     fn renderer_uploads_animation_frames_and_clears_when_inactive() {
-        let overlay = MemeOverlay::default();
-        let ctx = egui::Context::default();
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
-        let render = |elapsed| {
-            ctx.run_ui(egui::RawInput::default(), |ui| {
-                overlay.paint(
-                    ui.ctx(),
-                    MemePlayback {
-                        elapsed,
-                        sampled_at: Instant::now(),
-                        running: false,
-                    },
-                    5,
-                    screen,
-                    egui::Rect::from_min_size(egui::pos2(1500.0, 900.0), egui::vec2(300.0, 120.0)),
-                );
-            })
-        };
-        let mut first = render(Duration::ZERO);
-        first.textures_delta.clear();
-        assert!(overlay.error().is_none());
-        let image_bounds = |output: &egui::FullOutput| {
-            output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::epaint::Shape::Mesh(mesh)
-                        if mesh.texture_id != egui::TextureId::default() =>
-                    {
-                        Some(mesh.calc_bounds())
-                    }
-                    _ => None,
+        for interval in [2, 5] {
+            let overlay = MemeOverlay::default();
+            let ctx = egui::Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+            let render = |elapsed| {
+                ctx.run_ui(egui::RawInput::default(), |ui| {
+                    overlay.paint(
+                        ui.ctx(),
+                        MemePlayback {
+                            elapsed,
+                            sampled_at: Instant::now(),
+                            running: false,
+                        },
+                        interval,
+                        screen,
+                        egui::Rect::from_min_size(
+                            egui::pos2(1500.0, 900.0),
+                            egui::vec2(300.0, 120.0),
+                        ),
+                    );
                 })
-                .collect::<Vec<_>>()
-        };
-        let first_bounds = image_bounds(&first);
-        assert_eq!(first_bounds.len(), 1);
-        assert!((first_bounds[0].width() - 240.0).abs() < 0.001);
-        assert!(screen.contains_rect(first_bounds[0]));
-        let next_frame = overlay
-            .animation
-            .get()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .frames[0]
-            .ends_at;
-        let mut second = render(next_frame);
-        let uploaded_frame = !second.textures_delta.set.is_empty();
-        second.textures_delta.clear();
-        assert!(uploaded_frame);
-        assert_eq!(image_bounds(&second)[0], first_bounds[0]);
-        for elapsed in [Duration::from_secs(3), Duration::from_millis(4_999)] {
-            let mut gap = render(elapsed);
-            let uploads = gap.textures_delta.set.len();
-            gap.textures_delta.clear();
-            assert!(image_bounds(&gap).is_empty());
-            assert_eq!(uploads, 0);
-        }
-        let mut grown = render(Duration::from_secs(5));
-        grown.textures_delta.clear();
-        assert_eq!(
-            overlay
+            };
+            let mut first = render(Duration::ZERO);
+            first.textures_delta.clear();
+            assert!(overlay.error().is_none());
+            let image_bounds = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Mesh(mesh)
+                            if mesh.texture_id != egui::TextureId::default() =>
+                        {
+                            Some(mesh.calc_bounds())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let first_bounds = image_bounds(&first);
+            assert_eq!(first_bounds.len(), 1);
+            assert!((first_bounds[0].width() - 240.0).abs() < 0.001);
+            assert!(screen.contains_rect(first_bounds[0]));
+            let next_frame = overlay
                 .animation
                 .get()
                 .unwrap()
@@ -485,15 +469,47 @@ mod tests {
                 .unwrap()
                 .lock()
                 .unwrap()
-                .current_frame,
-            Some(0)
-        );
-        assert!((image_bounds(&grown)[0].width() - 300.0).abs() < 0.001);
-        assert_ne!(image_bounds(&grown)[0].center(), first_bounds[0].center());
-        overlay.deactivate();
-        let mut hidden = ctx.run_ui(egui::RawInput::default(), |_| {});
-        hidden.textures_delta.clear();
-        assert!(image_bounds(&hidden).is_empty());
+                .frames[0]
+                .ends_at;
+            let mut second = render(next_frame);
+            let uploaded_frame = !second.textures_delta.set.is_empty();
+            second.textures_delta.clear();
+            assert!(uploaded_frame);
+            assert_eq!(image_bounds(&second)[0], first_bounds[0]);
+            let mut last_frame = render(Duration::from_millis(1_799));
+            last_frame.textures_delta.clear();
+            assert_eq!(image_bounds(&last_frame), first_bounds);
+            for elapsed in [
+                Duration::from_millis(1_800),
+                Duration::from_secs(interval) - Duration::from_millis(1),
+            ] {
+                let mut gap = render(elapsed);
+                let uploads = gap.textures_delta.set.len();
+                gap.textures_delta.clear();
+                assert!(image_bounds(&gap).is_empty());
+                assert_eq!(uploads, 0);
+            }
+            let mut grown = render(Duration::from_secs(interval));
+            grown.textures_delta.clear();
+            assert_eq!(
+                overlay
+                    .animation
+                    .get()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .current_frame,
+                Some(0)
+            );
+            assert!((image_bounds(&grown)[0].width() - 300.0).abs() < 0.001);
+            assert_ne!(image_bounds(&grown)[0].center(), first_bounds[0].center());
+            overlay.deactivate();
+            let mut hidden = ctx.run_ui(egui::RawInput::default(), |_| {});
+            hidden.textures_delta.clear();
+            assert!(image_bounds(&hidden).is_empty());
+        }
     }
     #[test]
     fn placement_avoids_corner_and_freely_positioned_timers_on_offset_monitors() {
@@ -571,55 +587,75 @@ mod tests {
         );
     }
     #[test]
-    fn each_stage_plays_for_three_seconds_then_waits_and_restarts() {
-        for configured in [0, 1, 3, 4, 5, 60, u64::MAX] {
+    fn each_stage_plays_one_pass_then_waits_and_restarts() {
+        let animation = GifAnimation::decode(MEME_GIF).unwrap();
+        for configured in [0, 1, 2, 3, 4, 5, 60, u64::MAX] {
             let interval = growth_interval_seconds(configured);
-            assert!((4..=60).contains(&interval));
+            assert!((2..=60).contains(&interval));
             let cycle = Duration::from_secs(interval);
+            assert!(animation.duration < cycle);
             for stage in [0, 1, 10] {
                 let start = cycle * stage;
-                assert_eq!(elapsed_in_stage(start, configured), Duration::ZERO);
-                assert!(
-                    elapsed_in_stage(start + PLAY_DURATION - Duration::from_nanos(1), configured)
-                        < PLAY_DURATION
+                assert_eq!(
+                    animation.frame_index(elapsed_in_stage(start, configured)),
+                    Some(0)
                 );
                 assert_eq!(
-                    elapsed_in_stage(start + PLAY_DURATION, configured),
-                    PLAY_DURATION
+                    animation.frame_index(elapsed_in_stage(
+                        start + animation.duration - Duration::from_nanos(1),
+                        configured
+                    )),
+                    Some(animation.frames.len() - 1)
                 );
-                assert!(
-                    elapsed_in_stage(start + cycle - Duration::from_nanos(1), configured)
-                        >= PLAY_DURATION
+                assert_eq!(
+                    animation.frame_index(elapsed_in_stage(start + animation.duration, configured)),
+                    None
                 );
-                assert_eq!(elapsed_in_stage(start + cycle, configured), Duration::ZERO);
+                assert_eq!(
+                    animation.frame_index(elapsed_in_stage(
+                        start + cycle - Duration::from_nanos(1),
+                        configured
+                    )),
+                    None
+                );
+                assert_eq!(
+                    animation.frame_index(elapsed_in_stage(start + cycle, configured)),
+                    Some(0)
+                );
             }
         }
     }
 
     #[test]
-    fn pausing_during_the_gap_preserves_the_remaining_wait() {
+    fn pausing_during_the_shortest_gap_preserves_the_remaining_wait() {
+        let animation = GifAnimation::decode(MEME_GIF).unwrap();
         let start = Instant::now();
         let mut timer = CountdownTimer::new(Duration::from_secs(1));
         timer.toggle(start);
-        let paused = start + Duration::from_millis(4_500);
-        timer.toggle(paused);
+        timer.toggle(start + Duration::from_millis(2_900));
         let later = start + Duration::from_secs(100);
         let playback =
             MemePlayback::new(true, timer.reading(later), timer.is_running(), later).unwrap();
         assert_eq!(
-            elapsed_in_stage(playback.elapsed(later + Duration::from_secs(50)), 5),
-            Duration::from_millis(3_500)
+            elapsed_in_stage(playback.elapsed(later + Duration::from_secs(50)), 2),
+            Duration::from_millis(1_900)
         );
         timer.toggle(later);
         let resumed =
             MemePlayback::new(true, timer.reading(later), timer.is_running(), later).unwrap();
-        assert!(
-            elapsed_in_stage(resumed.elapsed(later + Duration::from_millis(1_499)), 5)
-                >= PLAY_DURATION
+        assert_eq!(
+            animation.frame_index(elapsed_in_stage(
+                resumed.elapsed(later + Duration::from_millis(99)),
+                2
+            )),
+            None
         );
         assert_eq!(
-            elapsed_in_stage(resumed.elapsed(later + Duration::from_millis(1_500)), 5),
-            Duration::ZERO
+            animation.frame_index(elapsed_in_stage(
+                resumed.elapsed(later + Duration::from_millis(100)),
+                2
+            )),
+            Some(0)
         );
     }
     #[test]
