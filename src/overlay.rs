@@ -183,6 +183,8 @@ struct CardAnimation {
 #[derive(Debug, Clone)]
 struct AnimatedCardFrame {
     rect: egui::Rect,
+    from: egui::Rect,
+    to: egui::Rect,
     transition_progress: f32,
     previous_text: Option<PreviousCardText>,
     animating: bool,
@@ -277,6 +279,8 @@ impl CardAnimation {
 
         AnimatedCardFrame {
             rect,
+            from: self.from,
+            to: self.to,
             transition_progress,
             previous_text: self.previous_text.clone(),
             animating,
@@ -472,26 +476,38 @@ impl OverlayBridge {
                     if let Some(previous) = &animated.previous_text {
                         let previous_galley =
                             timer_text_galley(ui, &previous.text, previous.font_size);
-                        paint_card_text(
-                            &painter,
-                            card_rect,
-                            previous_galley,
-                            previous
-                                .color
-                                .gamma_multiply(1.0 - animated.transition_progress),
-                        );
-                    }
-                    let current_opacity = if animated.previous_text.is_some() {
-                        animated.transition_progress
+                        if is_overtime_prefix_transition(&previous.text, &snapshot.time) {
+                            let plus_galley = timer_text_galley(ui, "+", snapshot.font_size);
+                            let start =
+                                centered_text_position(animated.from, previous_galley.size());
+                            let target = centered_text_position(animated.to, galley.size())
+                                + egui::vec2(plus_galley.size().x, 0.0);
+                            let digits_position =
+                                lerp_pos2(start, target, animated.transition_progress);
+                            let digits_color =
+                                lerp_color(previous.color, color, animated.transition_progress);
+                            paint_card_text_at(
+                                &painter,
+                                digits_position,
+                                previous_galley,
+                                digits_color,
+                            );
+
+                            let plus_opacity = late_prefix_opacity(animated.transition_progress);
+                            paint_card_text_at(
+                                &painter,
+                                digits_position - egui::vec2(plus_galley.size().x, 0.0),
+                                plus_galley,
+                                color.gamma_multiply(plus_opacity),
+                            );
+                        } else {
+                            // For other geometry changes retain one legible
+                            // label, then switch atomically at completion.
+                            paint_card_text(&painter, card_rect, previous_galley, previous.color);
+                        }
                     } else {
-                        1.0
-                    };
-                    paint_card_text(
-                        &painter,
-                        card_rect,
-                        galley,
-                        color.gamma_multiply(current_opacity),
-                    );
+                        paint_card_text(&painter, card_rect, galley, color);
+                    }
 
                     if snapshot.edit_mode {
                         edit_card_transform(
@@ -588,8 +604,51 @@ fn paint_card_text(
     galley: Arc<egui::Galley>,
     color: Color32,
 ) {
-    let position = card_rect.center() - galley.size() * 0.5;
+    let position = centered_text_position(card_rect, galley.size());
+    paint_card_text_at(painter, position, galley, color);
+}
+
+fn paint_card_text_at(
+    painter: &egui::Painter,
+    position: egui::Pos2,
+    galley: Arc<egui::Galley>,
+    color: Color32,
+) {
     painter.galley(position, galley, color);
+}
+
+fn centered_text_position(rect: egui::Rect, text_size: egui::Vec2) -> egui::Pos2 {
+    rect.center() - text_size * 0.5
+}
+
+fn is_overtime_prefix_transition(previous: &str, current: &str) -> bool {
+    current.strip_prefix('+') == Some(previous)
+}
+
+fn lerp_pos2(from: egui::Pos2, to: egui::Pos2, progress: f32) -> egui::Pos2 {
+    egui::pos2(
+        egui::lerp(from.x..=to.x, progress),
+        egui::lerp(from.y..=to.y, progress),
+    )
+}
+
+fn lerp_color(from: Color32, to: Color32, progress: f32) -> Color32 {
+    let channel = |from: u8, to: u8| {
+        egui::lerp(f32::from(from)..=f32::from(to), progress)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    Color32::from_rgba_unmultiplied(
+        channel(from.r(), to.r()),
+        channel(from.g(), to.g()),
+        channel(from.b(), to.b()),
+        channel(from.a(), to.a()),
+    )
+}
+
+fn late_prefix_opacity(progress: f32) -> f32 {
+    const FADE_START: f32 = 0.85;
+    ease_in_out_cubic(((progress - FADE_START) / (1.0 - FADE_START)).clamp(0.0, 1.0))
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -1126,6 +1185,38 @@ mod tests {
                 assert!(screen.expand(0.001).contains_rect(frame.rect));
             }
         }
+    }
+
+    #[test]
+    fn overtime_prefix_transition_requires_the_same_digits() {
+        assert!(is_overtime_prefix_transition("00:00", "+00:00"));
+        assert!(is_overtime_prefix_transition("100:00", "+100:00"));
+        assert!(!is_overtime_prefix_transition("00:01", "+00:00"));
+        assert!(!is_overtime_prefix_transition("00:00", "00:00"));
+        assert!(!is_overtime_prefix_transition("+00:00", "00:00"));
+    }
+
+    #[test]
+    fn overtime_digits_move_once_and_the_plus_appears_only_near_the_end() {
+        let from = egui::Rect::from_min_size(egui::pos2(300.0, 200.0), egui::vec2(180.0, 80.0));
+        let to = egui::Rect::from_min_size(egui::pos2(280.0, 200.0), egui::vec2(240.0, 80.0));
+        let digits_size = egui::vec2(100.0, 40.0);
+        let full_size = egui::vec2(120.0, 40.0);
+        let plus_width = 20.0;
+        let start = centered_text_position(from, digits_size);
+        let target = centered_text_position(to, full_size) + egui::vec2(plus_width, 0.0);
+
+        assert_eq!(lerp_pos2(start, target, 0.0), start);
+        assert_eq!(lerp_pos2(start, target, 1.0), target);
+        assert_eq!(late_prefix_opacity(0.84), 0.0);
+        assert!(late_prefix_opacity(0.9) > 0.0);
+        assert!(late_prefix_opacity(0.9) < 1.0);
+        assert_eq!(late_prefix_opacity(1.0), 1.0);
+        assert_eq!(
+            lerp_color(Color32::WHITE, Color32::RED, 0.0),
+            Color32::WHITE
+        );
+        assert_eq!(lerp_color(Color32::WHITE, Color32::RED, 1.0), Color32::RED);
     }
 
     #[test]
