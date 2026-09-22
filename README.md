@@ -11,6 +11,9 @@ Ein Windows-Präsentationstimer mit getrenntem Steuerfenster und klickdurchläss
 
 Nach Ablauf wechselt der Timer auf eine rote Überziehungsanzeige (`+MM:SS`). Diese
 kann wie der normale Countdown pausiert, fortgesetzt und zurückgesetzt werden.
+Breitenänderungen der Timerkarte werden weich animiert: Nahe am linken Rand wächst
+sie überwiegend nach rechts, mittig gleichmäßig in beide Richtungen und nahe am
+rechten Rand überwiegend nach links.
 
 Beim Minimieren verschwindet das Steuerfenster in den Windows-System-Tray. Timer,
 Overlay und Hotkeys laufen weiter. Ein Linksklick auf das Tray-Icon öffnet die

@@ -8,6 +8,10 @@ use eframe::egui::{self, Align2, Color32, RichText};
 use crate::meme::{MemeOverlay, MemePlayback};
 
 const OVERLAY_VIEWPORT_ID: &str = "overlay_timer_viewport";
+const CARD_ANIMATION_ID: &str = "overlay_timer_card_animation";
+const CARD_ANIMATION_SECONDS: f64 = 0.24;
+const CARD_HORIZONTAL_PADDING: f32 = 24.0;
+const CARD_VERTICAL_PADDING: f32 = 14.0;
 
 #[derive(Debug, Clone)]
 pub struct OverlaySnapshot {
@@ -117,6 +121,192 @@ struct ResizeGesture {
     start_font_size: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CardPlacement {
+    Anchored { anchor: Align2, offset: egui::Vec2 },
+    Custom([f32; 2]),
+}
+
+impl CardPlacement {
+    fn from_snapshot(snapshot: &OverlaySnapshot) -> Self {
+        snapshot.custom_position.map_or(
+            Self::Anchored {
+                anchor: snapshot.anchor,
+                offset: snapshot.anchor_offset,
+            },
+            Self::Custom,
+        )
+    }
+
+    fn initial_rect(self, size: egui::Vec2, screen: egui::Rect) -> egui::Rect {
+        match self {
+            Self::Anchored { anchor, offset } => anchor
+                .align_size_within_rect(size, screen)
+                .translate(offset),
+            Self::Custom(position) => {
+                egui::Rect::from_center_size(position_from_normalized(position, screen), size)
+            }
+        }
+    }
+
+    fn expansion_bias(self) -> egui::Vec2 {
+        match self {
+            Self::Anchored { anchor, .. } => {
+                egui::vec2(anchor.x().to_factor(), anchor.y().to_factor())
+            }
+            Self::Custom([x, y]) => egui::vec2(x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreviousCardText {
+    text: String,
+    font_size: f32,
+    color: Color32,
+}
+
+#[derive(Debug, Clone)]
+struct CardAnimation {
+    placement: CardPlacement,
+    screen: egui::Rect,
+    logical_target: egui::Rect,
+    from: egui::Rect,
+    to: egui::Rect,
+    started_at: f64,
+    current_text: String,
+    current_font_size: f32,
+    current_color: Color32,
+    previous_text: Option<PreviousCardText>,
+}
+
+#[derive(Debug, Clone)]
+struct AnimatedCardFrame {
+    rect: egui::Rect,
+    transition_progress: f32,
+    previous_text: Option<PreviousCardText>,
+    animating: bool,
+}
+
+impl CardAnimation {
+    fn new(
+        placement: CardPlacement,
+        screen: egui::Rect,
+        size: egui::Vec2,
+        text: String,
+        font_size: f32,
+        color: Color32,
+        now: f64,
+    ) -> Self {
+        let logical_target = placement.initial_rect(size, screen);
+        let target = fit_card_rect(logical_target, screen);
+        Self {
+            placement,
+            screen,
+            logical_target,
+            from: target,
+            to: target,
+            started_at: now,
+            current_text: text,
+            current_font_size: font_size,
+            current_color: color,
+            previous_text: None,
+        }
+    }
+
+    fn frame(
+        &mut self,
+        desired_size: egui::Vec2,
+        text: &str,
+        font_size: f32,
+        color: Color32,
+        now: f64,
+        animate: bool,
+    ) -> AnimatedCardFrame {
+        self.finish_completed_animation(now);
+
+        if !animate && self.is_animating(now) {
+            self.from = self.to;
+            self.started_at = now;
+            self.previous_text = None;
+        }
+
+        if !approximately_equal(self.logical_target.size(), desired_size) {
+            let current = self.current_rect(now);
+            self.logical_target = resize_card_rect(
+                self.logical_target,
+                desired_size,
+                self.placement.expansion_bias(),
+            );
+            let target = fit_card_rect(self.logical_target, self.screen);
+
+            if animate {
+                self.from = current;
+                self.to = target;
+                self.started_at = now;
+                self.previous_text = Some(PreviousCardText {
+                    text: self.current_text.clone(),
+                    font_size: self.current_font_size,
+                    color: self.current_color,
+                });
+            } else {
+                self.from = target;
+                self.to = target;
+                self.started_at = now;
+                self.previous_text = None;
+            }
+        } else if self.current_text != text {
+            // Equal-width timer ticks should remain crisp. Only a geometry
+            // change needs a cross-fade and a moving card.
+            self.previous_text = None;
+        }
+
+        self.current_text.clear();
+        self.current_text.push_str(text);
+        self.current_font_size = font_size;
+        self.current_color = color;
+
+        let raw_progress = self.raw_progress(now);
+        let transition_progress = ease_in_out_cubic(raw_progress);
+        let animating = raw_progress < 1.0 && self.from != self.to;
+        let rect = lerp_rect(self.from, self.to, transition_progress);
+        if !animating {
+            self.from = self.to;
+            self.previous_text = None;
+        }
+
+        AnimatedCardFrame {
+            rect,
+            transition_progress,
+            previous_text: self.previous_text.clone(),
+            animating,
+        }
+    }
+
+    fn raw_progress(&self, now: f64) -> f32 {
+        ((now - self.started_at) / CARD_ANIMATION_SECONDS).clamp(0.0, 1.0) as f32
+    }
+
+    fn current_rect(&self, now: f64) -> egui::Rect {
+        lerp_rect(
+            self.from,
+            self.to,
+            ease_in_out_cubic(self.raw_progress(now)),
+        )
+    }
+
+    fn is_animating(&self, now: f64) -> bool {
+        self.from != self.to && self.raw_progress(now) < 1.0
+    }
+
+    fn finish_completed_animation(&mut self, now: f64) {
+        if self.from != self.to && self.raw_progress(now) >= 1.0 {
+            self.from = self.to;
+            self.previous_text = None;
+        }
+    }
+}
+
 pub struct OverlayBridge {
     snapshot: Arc<RwLock<OverlaySnapshot>>,
     events_tx: Sender<OverlayEvent>,
@@ -213,6 +403,7 @@ impl OverlayBridge {
                 if !snapshot.visible
                     || !synchronize_native(overlay_ui.ctx(), &snapshot, &native_error)
                 {
+                    clear_card_animation(overlay_ui.ctx());
                     return;
                 }
 
@@ -231,57 +422,81 @@ impl OverlayBridge {
                     overlay_ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
                 }
 
-                let mut area = egui::Area::new(egui::Id::new("countdown"))
+                let color = if snapshot.overtime {
+                    Color32::from_rgb(255, 105, 105)
+                } else {
+                    Color32::from_rgb(
+                        snapshot.text_color[0],
+                        snapshot.text_color[1],
+                        snapshot.text_color[2],
+                    )
+                };
+                let galley = timer_text_galley(overlay_ui, &snapshot.time, snapshot.font_size);
+                let desired_size = galley.size()
+                    + egui::vec2(CARD_HORIZONTAL_PADDING * 2.0, CARD_VERTICAL_PADDING * 2.0);
+                let now = overlay_ui.input(|input| input.time);
+                let animated = animated_card_frame(
+                    overlay_ui.ctx(),
+                    CardPlacement::from_snapshot(&snapshot),
+                    screen_rect,
+                    desired_size,
+                    &snapshot.time,
+                    snapshot.font_size,
+                    color,
+                    now,
+                    !snapshot.edit_mode,
+                );
+
+                // Position by the already measured top-left corner. Unlike an
+                // anchored Area this never needs the previous frame's size.
+                let area = egui::Area::new(egui::Id::new("countdown"))
                     .movable(false)
                     .interactable(snapshot.edit_mode)
-                    .constrain_to(screen_rect)
-                    .fade_in(false);
-
-                if let Some(position) = snapshot.custom_position {
-                    area = area
-                        .pivot(Align2::CENTER_CENTER)
-                        .current_pos(position_from_normalized(position, screen_rect));
-                } else if snapshot.edit_mode {
-                    area = area.pivot(snapshot.anchor).current_pos(
-                        snapshot.anchor.pos_in_rect(&screen_rect) + snapshot.anchor_offset,
-                    );
-                } else {
-                    area = area.anchor(snapshot.anchor, snapshot.anchor_offset);
-                }
+                    .constrain(false)
+                    .fade_in(false)
+                    .pivot(Align2::LEFT_TOP)
+                    .current_pos(animated.rect.min);
 
                 let timer_card = area.show(overlay_ui.ctx(), |ui| {
-                    let frame_response = egui::Frame::new()
-                        .fill(Color32::from_black_alpha(snapshot.background_opacity))
-                        .corner_radius(12.0)
-                        .inner_margin(egui::Margin::symmetric(24, 14))
-                        .show(ui, |ui| {
-                            let color = if snapshot.overtime {
-                                Color32::from_rgb(255, 105, 105)
-                            } else {
-                                Color32::from_rgb(
-                                    snapshot.text_color[0],
-                                    snapshot.text_color[1],
-                                    snapshot.text_color[2],
-                                )
-                            };
+                    let (card_rect, card_response) =
+                        ui.allocate_exact_size(animated.rect.size(), egui::Sense::hover());
+                    ui.painter().rect_filled(
+                        card_rect,
+                        12.0,
+                        Color32::from_black_alpha(snapshot.background_opacity),
+                    );
 
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(&snapshot.time)
-                                        .size(snapshot.font_size)
-                                        .color(color)
-                                        .strong()
-                                        .monospace(),
-                                )
-                                .extend(),
-                            );
-                        });
+                    let painter = ui
+                        .painter()
+                        .with_clip_rect(card_rect.intersect(screen_rect));
+                    if let Some(previous) = &animated.previous_text {
+                        let previous_galley =
+                            timer_text_galley(ui, &previous.text, previous.font_size);
+                        paint_card_text(
+                            &painter,
+                            card_rect,
+                            previous_galley,
+                            previous
+                                .color
+                                .gamma_multiply(1.0 - animated.transition_progress),
+                        );
+                    }
+                    let current_opacity = if animated.previous_text.is_some() {
+                        animated.transition_progress
+                    } else {
+                        1.0
+                    };
+                    paint_card_text(
+                        &painter,
+                        card_rect,
+                        galley,
+                        color.gamma_multiply(current_opacity),
+                    );
 
-                    let card_rect = frame_response.response.rect;
                     if snapshot.edit_mode {
                         edit_card_transform(
                             ui,
-                            frame_response.response,
+                            card_response,
                             screen_rect,
                             &snapshot,
                             &shared_snapshot,
@@ -357,6 +572,131 @@ fn synchronize_native(
         ctx.request_repaint_of(OverlayBridge::viewport_id());
     }
     ready
+}
+
+fn timer_text_galley(ui: &egui::Ui, text: &str, font_size: f32) -> Arc<egui::Galley> {
+    let text: egui::WidgetText = RichText::new(text)
+        .size(font_size)
+        .strong()
+        .monospace()
+        .into();
+    text.into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::FontSelection::Default,
+    )
+}
+
+fn paint_card_text(
+    painter: &egui::Painter,
+    card_rect: egui::Rect,
+    galley: Arc<egui::Galley>,
+    color: Color32,
+) {
+    let position = card_rect.center() - galley.size() * 0.5;
+    painter.galley(position, galley, color);
+}
+
+#[expect(clippy::too_many_arguments)]
+fn animated_card_frame(
+    ctx: &egui::Context,
+    placement: CardPlacement,
+    screen: egui::Rect,
+    desired_size: egui::Vec2,
+    text: &str,
+    font_size: f32,
+    color: Color32,
+    now: f64,
+    animate: bool,
+) -> AnimatedCardFrame {
+    let id = egui::Id::new(CARD_ANIMATION_ID);
+    let mut frame = None;
+    ctx.data_mut(|data| {
+        let mut state = data
+            .get_temp::<CardAnimation>(id)
+            .filter(|state| state.placement == placement && state.screen == screen)
+            .unwrap_or_else(|| {
+                CardAnimation::new(
+                    placement,
+                    screen,
+                    desired_size,
+                    text.to_owned(),
+                    font_size,
+                    color,
+                    now,
+                )
+            });
+        frame = Some(state.frame(desired_size, text, font_size, color, now, animate));
+        data.insert_temp(id, state);
+    });
+
+    let frame = frame.expect("the card frame is assigned while egui data is locked");
+    if frame.animating {
+        // The normal timer cadence is 100 ms. Ask the overlay viewport for
+        // immediate frames only while a 240 ms card transition is active.
+        ctx.request_repaint_of(OverlayBridge::viewport_id());
+    }
+    frame
+}
+
+fn clear_card_animation(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<CardAnimation>(egui::Id::new(CARD_ANIMATION_ID)));
+}
+
+fn resize_card_rect(rect: egui::Rect, desired_size: egui::Vec2, bias: egui::Vec2) -> egui::Rect {
+    let delta = desired_size - rect.size();
+    egui::Rect::from_min_max(
+        rect.min - egui::vec2(bias.x * delta.x, bias.y * delta.y),
+        rect.max + egui::vec2((1.0 - bias.x) * delta.x, (1.0 - bias.y) * delta.y),
+    )
+}
+
+fn fit_card_rect(rect: egui::Rect, screen: egui::Rect) -> egui::Rect {
+    let horizontal_shift = if rect.width() >= screen.width() {
+        screen.center().x - rect.center().x
+    } else if rect.left() < screen.left() {
+        screen.left() - rect.left()
+    } else if rect.right() > screen.right() {
+        screen.right() - rect.right()
+    } else {
+        0.0
+    };
+    let vertical_shift = if rect.height() >= screen.height() {
+        screen.center().y - rect.center().y
+    } else if rect.top() < screen.top() {
+        screen.top() - rect.top()
+    } else if rect.bottom() > screen.bottom() {
+        screen.bottom() - rect.bottom()
+    } else {
+        0.0
+    };
+    rect.translate(egui::vec2(horizontal_shift, vertical_shift))
+}
+
+fn lerp_rect(from: egui::Rect, to: egui::Rect, progress: f32) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(
+            egui::lerp(from.min.x..=to.min.x, progress),
+            egui::lerp(from.min.y..=to.min.y, progress),
+        ),
+        egui::pos2(
+            egui::lerp(from.max.x..=to.max.x, progress),
+            egui::lerp(from.max.y..=to.max.y, progress),
+        ),
+    )
+}
+
+fn ease_in_out_cubic(progress: f32) -> f32 {
+    if progress < 0.5 {
+        4.0 * progress.powi(3)
+    } else {
+        1.0 - (-2.0 * progress + 2.0).powi(3) / 2.0
+    }
+}
+
+fn approximately_equal(left: egui::Vec2, right: egui::Vec2) -> bool {
+    (left.x - right.x).abs() <= 0.01 && (left.y - right.y).abs() <= 0.01
 }
 
 fn edit_mode_exit_button(ctx: &egui::Context) -> bool {
@@ -526,8 +866,8 @@ fn proportional_scale_from_drag(gesture: ResizeGesture, drag_delta: egui::Vec2) 
 }
 
 fn estimated_card_size(start_size: egui::Vec2, start_font_size: f32, font_size: f32) -> egui::Vec2 {
-    const HORIZONTAL_MARGIN: f32 = 48.0;
-    const VERTICAL_MARGIN: f32 = 28.0;
+    const HORIZONTAL_MARGIN: f32 = CARD_HORIZONTAL_PADDING * 2.0;
+    const VERTICAL_MARGIN: f32 = CARD_VERTICAL_PADDING * 2.0;
     let scale = font_size / start_font_size.max(f32::EPSILON);
     egui::vec2(
         (start_size.x - HORIZONTAL_MARGIN).max(0.0) * scale + HORIZONTAL_MARGIN,
@@ -707,5 +1047,150 @@ mod tests {
 
             assert_eq!(corner.opposite_position(result), fixed);
         }
+    }
+
+    #[test]
+    fn card_growth_is_distributed_by_its_normalized_position() {
+        let start = egui::Rect::from_min_size(egui::pos2(300.0, 200.0), egui::vec2(180.0, 80.0));
+        let desired_size = egui::vec2(240.0, 80.0);
+
+        let one_third = resize_card_rect(start, desired_size, egui::vec2(1.0 / 3.0, 0.5));
+        assert_rect_close(
+            one_third,
+            egui::Rect::from_min_max(egui::pos2(280.0, 200.0), egui::pos2(520.0, 280.0)),
+        );
+
+        let centered = resize_card_rect(start, desired_size, egui::Vec2::splat(0.5));
+        assert_rect_close(
+            centered,
+            egui::Rect::from_min_max(egui::pos2(270.0, 200.0), egui::pos2(510.0, 280.0)),
+        );
+
+        let right = resize_card_rect(start, desired_size, egui::vec2(1.0, 0.5));
+        assert_rect_close(
+            right,
+            egui::Rect::from_min_max(egui::pos2(240.0, 200.0), egui::pos2(480.0, 280.0)),
+        );
+    }
+
+    #[test]
+    fn overtime_prefix_produces_the_expected_geometry_change() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let remaining = timer_text_galley(ui, "00:00", 64.0);
+            let overtime = timer_text_galley(ui, "+00:00", 64.0);
+
+            assert!(overtime.size().x > remaining.size().x);
+            assert!((overtime.size().y - remaining.size().y).abs() < 0.001);
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn growing_and_shrinking_with_the_same_bias_is_reversible() {
+        let start = egui::Rect::from_min_size(egui::pos2(300.0, 200.0), egui::vec2(180.0, 80.0));
+        for bias in [0.0, 1.0 / 3.0, 0.5, 1.0] {
+            let grown = resize_card_rect(start, egui::vec2(240.0, 80.0), egui::vec2(bias, 0.5));
+            let restored = resize_card_rect(grown, start.size(), egui::vec2(bias, 0.5));
+            assert_rect_close(restored, start);
+        }
+    }
+
+    #[test]
+    fn fitted_animation_stays_inside_every_horizontal_screen_position() {
+        let screen =
+            egui::Rect::from_min_size(egui::pos2(-1_920.0, 120.0), egui::vec2(1_920.0, 1_080.0));
+        for x in [0.0, 0.1, 1.0 / 3.0, 0.5, 0.9, 1.0] {
+            let placement = CardPlacement::Custom([x, 0.5]);
+            let mut animation = CardAnimation::new(
+                placement,
+                screen,
+                egui::vec2(180.0, 80.0),
+                "00:00".into(),
+                64.0,
+                Color32::WHITE,
+                0.0,
+            );
+
+            for step in 0..=24 {
+                let now = f64::from(step) * CARD_ANIMATION_SECONDS / 24.0;
+                let frame = animation.frame(
+                    egui::vec2(240.0, 80.0),
+                    "+00:00",
+                    64.0,
+                    Color32::RED,
+                    now,
+                    true,
+                );
+                assert!(screen.expand(0.001).contains_rect(frame.rect));
+            }
+        }
+    }
+
+    #[test]
+    fn geometry_changes_animate_but_equal_width_ticks_do_not() {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+        let mut animation = CardAnimation::new(
+            CardPlacement::Custom([1.0 / 3.0, 0.5]),
+            screen,
+            egui::vec2(180.0, 80.0),
+            "00:00".into(),
+            64.0,
+            Color32::WHITE,
+            0.0,
+        );
+
+        let tick = animation.frame(
+            egui::vec2(180.0, 80.0),
+            "00:59",
+            64.0,
+            Color32::WHITE,
+            0.0,
+            true,
+        );
+        assert!(!tick.animating);
+        assert!(tick.previous_text.is_none());
+
+        let start = animation.frame(
+            egui::vec2(240.0, 80.0),
+            "+00:00",
+            64.0,
+            Color32::RED,
+            1.0,
+            true,
+        );
+        assert!(start.animating);
+        assert_eq!(start.previous_text.as_ref().unwrap().text, "00:59");
+
+        let middle = animation.frame(
+            egui::vec2(240.0, 80.0),
+            "+00:00",
+            64.0,
+            Color32::RED,
+            1.0 + CARD_ANIMATION_SECONDS / 2.0,
+            true,
+        );
+        assert!(middle.animating);
+        assert!(middle.rect.width() > start.rect.width());
+        assert!(middle.rect.width() < 240.0);
+
+        let end = animation.frame(
+            egui::vec2(240.0, 80.0),
+            "+00:00",
+            64.0,
+            Color32::RED,
+            1.0 + CARD_ANIMATION_SECONDS,
+            true,
+        );
+        assert!(!end.animating);
+        assert!(end.previous_text.is_none());
+        assert!((end.rect.width() - 240.0).abs() < 0.001);
+    }
+
+    fn assert_rect_close(actual: egui::Rect, expected: egui::Rect) {
+        assert!((actual.min.x - expected.min.x).abs() < 0.001);
+        assert!((actual.min.y - expected.min.y).abs() < 0.001);
+        assert!((actual.max.x - expected.max.x).abs() < 0.001);
+        assert!((actual.max.y - expected.max.y).abs() < 0.001);
     }
 }
