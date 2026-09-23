@@ -6,6 +6,7 @@ use std::{
         mpsc::{self, Receiver},
     },
     thread,
+    time::Instant,
 };
 
 use windows::{
@@ -50,8 +51,14 @@ pub enum MonitorEvent {
     ShowEnded,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TimedEvent {
+    pub event: MonitorEvent,
+    pub observed_at: Instant,
+}
+
 pub struct PowerPointMonitor {
-    receiver: Receiver<MonitorEvent>,
+    receiver: Receiver<TimedEvent>,
     stop: Arc<AtomicBool>,
 }
 
@@ -66,7 +73,7 @@ impl PowerPointMonitor {
         Ok(Self { receiver, stop })
     }
 
-    pub fn drain(&self) -> Vec<MonitorEvent> {
+    pub fn drain(&self) -> Vec<TimedEvent> {
         self.receiver.try_iter().collect()
     }
 }
@@ -295,8 +302,9 @@ impl TransitionTracker {
 fn send_events(
     events: impl IntoIterator<Item = MonitorEvent>,
     last_status: &mut Option<MonitorStatus>,
-    sender: &mpsc::Sender<MonitorEvent>,
+    sender: &mpsc::Sender<TimedEvent>,
 ) -> bool {
+    let observed_at = Instant::now();
     for event in events {
         if let MonitorEvent::Status(status) = event {
             if *last_status == Some(status) {
@@ -304,16 +312,19 @@ fn send_events(
             }
             *last_status = Some(status);
         }
-        if sender.send(event).is_err() {
+        if sender.send(TimedEvent { event, observed_at }).is_err() {
             return false;
         }
     }
     true
 }
 
-fn run_monitor(sender: mpsc::Sender<MonitorEvent>, stop: Arc<AtomicBool>) {
+fn run_monitor(sender: mpsc::Sender<TimedEvent>, stop: Arc<AtomicBool>) {
     let Ok(_apartment) = ComApartment::initialize() else {
-        let _ = sender.send(MonitorEvent::Status(MonitorStatus::Unavailable));
+        let _ = sender.send(TimedEvent {
+            event: MonitorEvent::Status(MonitorStatus::Unavailable),
+            observed_at: Instant::now(),
+        });
         return;
     };
     let mut application: Option<IDispatch> = None;
@@ -368,7 +379,7 @@ fn run_monitor(sender: mpsc::Sender<MonitorEvent>, stop: Arc<AtomicBool>) {
 fn report_disconnection(
     tracker: &mut TransitionTracker,
     last_status: &mut Option<MonitorStatus>,
-    sender: &mpsc::Sender<MonitorEvent>,
+    sender: &mpsc::Sender<TimedEvent>,
 ) -> bool {
     if powerpoint_process_running() == Some(false) {
         send_events(tracker.observe(None), last_status, sender)

@@ -6,7 +6,6 @@ mod icon_data;
 mod meme;
 mod monitors;
 mod overlay;
-#[allow(dead_code)] // The monitor is connected to the timer in the next implementation step.
 mod powerpoint;
 mod timer;
 mod tray;

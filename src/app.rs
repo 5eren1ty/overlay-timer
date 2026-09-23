@@ -11,6 +11,7 @@ use crate::{
     meme::{MemePlayback, growth_interval_seconds},
     monitors::{self, MonitorInfo},
     overlay::{OverlayBridge, OverlayEvent, OverlaySnapshot},
+    powerpoint::{MonitorEvent, PowerPointMonitor},
     timer::{CountdownTimer, TimerReading, TimerState, format_reading},
     tray::{TrayCommand, TrayController},
 };
@@ -116,6 +117,7 @@ impl OverlayPosition {
 #[serde(default)]
 struct Settings {
     duration_seconds: u64,
+    powerpoint_auto: bool,
     overlay_visible: bool,
     monitor_index: usize,
     position: OverlayPosition,
@@ -134,6 +136,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             duration_seconds: 10 * 60,
+            powerpoint_auto: false,
             overlay_visible: true,
             monitor_index: 0,
             position: OverlayPosition::BottomRight,
@@ -198,6 +201,8 @@ impl Hotkeys {
 pub struct OverlayTimerApp {
     settings: Settings,
     timer: CountdownTimer,
+    powerpoint: Option<PowerPointMonitor>,
+    auto_session: bool,
     monitors: Vec<MonitorInfo>,
     hotkeys: Hotkeys,
     tray: Option<TrayController>,
@@ -219,6 +224,10 @@ impl OverlayTimerApp {
         configure_theme(&creation_context.egui_ctx, settings.dark_mode);
 
         let timer = CountdownTimer::new(Duration::from_secs(settings.duration_seconds));
+        let powerpoint = settings
+            .powerpoint_auto
+            .then(PowerPointMonitor::start)
+            .and_then(Result::ok);
         let overlay =
             OverlayBridge::new(overlay_snapshot(&settings, &timer, false, Instant::now()));
         let (tray, tray_error) = match TrayController::new() {
@@ -228,6 +237,8 @@ impl OverlayTimerApp {
         let mut app = Self {
             settings,
             timer,
+            powerpoint,
+            auto_session: false,
             monitors: monitors::enumerate(),
             hotkeys: Hotkeys::register(),
             tray,
@@ -303,6 +314,25 @@ impl OverlayTimerApp {
                 TrayCommand::Exit => {
                     ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close)
                 }
+            }
+        }
+    }
+
+    fn process_powerpoint(&mut self) {
+        let events = self
+            .powerpoint
+            .as_ref()
+            .map_or_else(Vec::new, PowerPointMonitor::drain);
+        for update in events {
+            let started = apply_powerpoint_event(
+                &mut self.timer,
+                &mut self.auto_session,
+                update.event,
+                update.observed_at,
+                self.settings.duration_seconds,
+            );
+            if started {
+                self.edit_mode = false;
             }
         }
     }
@@ -839,6 +869,7 @@ impl eframe::App for OverlayTimerApp {
         }
         self.process_hotkeys(now);
         self.process_tray(ctx, now);
+        self.process_powerpoint();
         self.sync_tray(now);
         self.sync_overlay(now);
         // Keep native geometry and visibility checks running even while the
@@ -854,6 +885,33 @@ impl eframe::App for OverlayTimerApp {
         self.sync_tray(now);
         self.sync_overlay(now);
         self.overlay.show(ui);
+    }
+}
+
+fn apply_powerpoint_event(
+    timer: &mut CountdownTimer,
+    auto_session: &mut bool,
+    event: MonitorEvent,
+    at: Instant,
+    duration_seconds: u64,
+) -> bool {
+    match event {
+        MonitorEvent::Status(_) => false,
+        MonitorEvent::ShowStarted => {
+            timer.reset();
+            *auto_session = duration_seconds > 0;
+            if *auto_session {
+                timer.toggle(at);
+            }
+            *auto_session
+        }
+        MonitorEvent::ShowEnded => {
+            if *auto_session && timer.is_running() {
+                timer.toggle(at);
+            }
+            *auto_session = false;
+            false
+        }
     }
 }
 
@@ -1190,7 +1248,73 @@ fn error_box(ui: &mut egui::Ui, text: &str, palette: Palette) {
 
 #[cfg(test)]
 mod tests {
-    use super::Settings;
+    use super::{Settings, apply_powerpoint_event};
+    use crate::{
+        powerpoint::MonitorEvent,
+        timer::{CountdownTimer, TimerReading, TimerState},
+    };
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn powerpoint_handover_stops_then_restarts_the_full_countdown() {
+        let start = Instant::now();
+        let mut timer = CountdownTimer::new(Duration::from_secs(300));
+        let mut auto_session = false;
+
+        assert!(apply_powerpoint_event(
+            &mut timer,
+            &mut auto_session,
+            MonitorEvent::ShowStarted,
+            start,
+            300,
+        ));
+        assert_eq!(
+            timer.reading(start + Duration::from_secs(60)),
+            TimerReading::Remaining(Duration::from_secs(240))
+        );
+
+        apply_powerpoint_event(
+            &mut timer,
+            &mut auto_session,
+            MonitorEvent::ShowEnded,
+            start + Duration::from_secs(60),
+            300,
+        );
+        assert_eq!(timer.state(), TimerState::Paused);
+        assert_eq!(
+            timer.reading(start + Duration::from_secs(120)),
+            TimerReading::Remaining(Duration::from_secs(240))
+        );
+
+        apply_powerpoint_event(
+            &mut timer,
+            &mut auto_session,
+            MonitorEvent::ShowStarted,
+            start + Duration::from_secs(120),
+            300,
+        );
+        assert_eq!(timer.state(), TimerState::Running);
+        assert_eq!(
+            timer.reading(start + Duration::from_secs(120)),
+            TimerReading::Remaining(Duration::from_secs(300))
+        );
+    }
+
+    #[test]
+    fn ending_an_existing_show_does_not_pause_manual_timing() {
+        let now = Instant::now();
+        let mut timer = CountdownTimer::new(Duration::from_secs(300));
+        let mut auto_session = false;
+        timer.toggle(now);
+        apply_powerpoint_event(
+            &mut timer,
+            &mut auto_session,
+            MonitorEvent::ShowEnded,
+            now + Duration::from_secs(20),
+            300,
+        );
+        assert_eq!(timer.state(), TimerState::Running);
+    }
 
     #[test]
     fn meme_mode_is_never_persisted_or_restored() {
