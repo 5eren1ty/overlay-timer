@@ -1034,12 +1034,16 @@ mod tests {
             }),
         );
         for builder in [
-            inset_viewport_builder(false, false).with_title("Controller"),
+            crate::control_viewport_builder(),
+            crate::control_viewport_builder()
+                .with_inner_size([535.0, 907.0])
+                .with_position([365.0, 151.0]),
             inset_viewport_builder(false, false).with_fullscreen(true),
             inset_viewport_builder(false, false).with_monitor(0),
         ] {
             let (_, after) = egui_winit::physical_creation::prepare(&ctx, &builder);
-            assert_eq!(after.inner_size, Some(egui::vec2(800.0, 450.0)));
+            assert_eq!(after.inner_size, builder.inner_size);
+            assert_eq!(after.position, builder.position);
         }
         egui_winit::physical_creation::set(&ctx, "Overlay Timer", None);
         let (_, after) =
