@@ -30,6 +30,10 @@ Globale Hotkeys funktionieren auch dann, wenn PowerPoint den Fokus besitzt:
 | `Ctrl+Alt+R` | Reset |
 | `Ctrl+Alt+O` | Overlay ein-/ausblenden |
 
+## PowerPoint-Automatik
+
+In der Konsole **PowerPoint** einschalten. Eine neu gestartete Bildschirmpräsentation setzt den Countdown zurück und startet ihn. Beim Beenden bleibt er pausiert stehen; die nächste Präsentation startet wieder mit der eingestellten Dauer. Der Schalter bleibt für den nächsten Programmstart gespeichert. Bereits laufende Präsentationen beim Einschalten werden nicht nachträglich gemessen. Die Erkennung funktioniert mit PowerPoint Desktop auf demselben Windows-Rechner.
+
 ## Meme-Modus
 
 Im Steuerfenster **Meme-Modus** einschalten. Sobald der Countdown abläuft,

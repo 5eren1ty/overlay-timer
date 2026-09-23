@@ -11,7 +11,7 @@ use crate::{
     meme::{MemePlayback, growth_interval_seconds},
     monitors::{self, MonitorInfo},
     overlay::{OverlayBridge, OverlayEvent, OverlaySnapshot},
-    powerpoint::{MonitorEvent, PowerPointMonitor},
+    powerpoint::{MonitorEvent, MonitorStatus, PowerPointMonitor},
     timer::{CountdownTimer, TimerReading, TimerState, format_reading},
     tray::{TrayCommand, TrayController},
 };
@@ -202,6 +202,8 @@ pub struct OverlayTimerApp {
     settings: Settings,
     timer: CountdownTimer,
     powerpoint: Option<PowerPointMonitor>,
+    powerpoint_status: Option<MonitorStatus>,
+    powerpoint_error: Option<String>,
     auto_session: bool,
     monitors: Vec<MonitorInfo>,
     hotkeys: Hotkeys,
@@ -224,10 +226,14 @@ impl OverlayTimerApp {
         configure_theme(&creation_context.egui_ctx, settings.dark_mode);
 
         let timer = CountdownTimer::new(Duration::from_secs(settings.duration_seconds));
-        let powerpoint = settings
-            .powerpoint_auto
-            .then(PowerPointMonitor::start)
-            .and_then(Result::ok);
+        let (powerpoint, powerpoint_error) = if settings.powerpoint_auto {
+            match PowerPointMonitor::start() {
+                Ok(monitor) => (Some(monitor), None),
+                Err(error) => (None, Some(error.to_string())),
+            }
+        } else {
+            (None, None)
+        };
         let overlay =
             OverlayBridge::new(overlay_snapshot(&settings, &timer, false, Instant::now()));
         let (tray, tray_error) = match TrayController::new() {
@@ -238,6 +244,8 @@ impl OverlayTimerApp {
             settings,
             timer,
             powerpoint,
+            powerpoint_status: None,
+            powerpoint_error,
             auto_session: false,
             monitors: monitors::enumerate(),
             hotkeys: Hotkeys::register(),
@@ -266,6 +274,38 @@ impl OverlayTimerApp {
         }
         self.settings.duration_seconds = duration_seconds;
         self.timer.set_total(Duration::from_secs(duration_seconds));
+    }
+
+    fn set_powerpoint_auto(&mut self, enabled: bool) {
+        self.settings.powerpoint_auto = enabled;
+        self.powerpoint_status = None;
+        self.powerpoint_error = None;
+        self.auto_session = false;
+        self.powerpoint = if enabled {
+            match PowerPointMonitor::start() {
+                Ok(monitor) => Some(monitor),
+                Err(error) => {
+                    self.powerpoint_error = Some(error.to_string());
+                    None
+                }
+            }
+        } else {
+            None
+        };
+    }
+
+    fn powerpoint_status_label(&self) -> &'static str {
+        if self.powerpoint_error.is_some() {
+            return "Fehler";
+        }
+        match self.powerpoint_status {
+            None => "Verbinde…",
+            Some(MonitorStatus::Unavailable) => "Nicht verfügbar",
+            Some(MonitorStatus::Waiting) => "Bereit",
+            Some(MonitorStatus::ExistingShow) => "Bereits aktiv",
+            Some(MonitorStatus::Showing) => "Präsentation",
+            Some(MonitorStatus::MultipleShows) => "Mehrere aktiv",
+        }
     }
 
     fn toggle_timer(&mut self, now: Instant) {
@@ -324,6 +364,9 @@ impl OverlayTimerApp {
             .as_ref()
             .map_or_else(Vec::new, PowerPointMonitor::drain);
         for update in events {
+            if let MonitorEvent::Status(status) = update.event {
+                self.powerpoint_status = Some(status);
+            }
             let started = apply_powerpoint_event(
                 &mut self.timer,
                 &mut self.auto_session,
@@ -552,6 +595,27 @@ impl OverlayTimerApp {
                 {
                     self.timer.reset();
                 }
+            });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("PowerPoint").size(12.0).color(palette.text));
+                if self.settings.powerpoint_auto {
+                    let response = ui.label(
+                        RichText::new(format!("· {}", self.powerpoint_status_label()))
+                            .size(12.0)
+                            .color(palette.muted),
+                    );
+                    if let Some(error) = &self.powerpoint_error {
+                        response.on_hover_text(error);
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut enabled = self.settings.powerpoint_auto;
+                    if toggle_switch(ui, &mut enabled, palette).changed() {
+                        self.set_powerpoint_auto(enabled);
+                    }
+                });
             });
         });
     }
@@ -870,6 +934,7 @@ impl eframe::App for OverlayTimerApp {
         self.process_hotkeys(now);
         self.process_tray(ctx, now);
         self.process_powerpoint();
+        let now = Instant::now();
         self.sync_tray(now);
         self.sync_overlay(now);
         // Keep native geometry and visibility checks running even while the
@@ -1314,6 +1379,22 @@ mod tests {
             300,
         );
         assert_eq!(timer.state(), TimerState::Running);
+    }
+
+    #[test]
+    fn powerpoint_auto_setting_is_optional_and_persisted() {
+        let mut stored = serde_json::to_value(Settings::default()).unwrap();
+        stored.as_object_mut().unwrap().remove("powerpoint_auto");
+        let old_settings: Settings = serde_json::from_value(stored).unwrap();
+        assert!(!old_settings.powerpoint_auto);
+
+        let enabled = Settings {
+            powerpoint_auto: true,
+            ..old_settings
+        };
+        let restored: Settings =
+            serde_json::from_value(serde_json::to_value(enabled).unwrap()).unwrap();
+        assert!(restored.powerpoint_auto);
     }
 
     #[test]
